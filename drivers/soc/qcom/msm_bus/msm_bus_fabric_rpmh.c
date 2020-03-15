@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -708,26 +708,6 @@ static void bcm_commit_single_req(struct msm_bus_node_device_type *cur_bcm,
 	kfree(cmd_active);
 }
 
-void msm_bus_commit_single(struct device *dev)
-{
-	struct msm_bus_node_device_type *bus_dev;
-	struct msm_bus_node_device_type *bcm_dev;
-
-	if (!dev)
-		return;
-
-	bus_dev = to_msm_bus_node(dev);
-	if (!bus_dev)
-		return;
-
-	bcm_dev = to_msm_bus_node(bus_dev->node_info->bcm_devs[0]);
-	if (!bcm_dev)
-		return;
-
-	bcm_commit_single_req(bcm_dev, bcm_dev->node_vec[DUAL_CTX].vec_a,
-				bcm_dev->node_vec[DUAL_CTX].vec_b);
-}
-
 void *msm_bus_realloc_devmem(struct device *dev, void *p, size_t old_size,
 					size_t new_size, gfp_t flags)
 {
@@ -955,7 +935,7 @@ static int msm_bus_dev_init_qos(struct device *dev, void *data)
 		goto exit_init_qos;
 	}
 
-	if (node_dev->ap_owned) {
+	if (node_dev->ap_owned && node_dev->num_node_qos_clks) {
 		struct msm_bus_node_device_type *bus_node_info;
 
 		bus_node_info =

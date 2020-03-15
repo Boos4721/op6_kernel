@@ -34,8 +34,6 @@
 #include <linux/compat.h>
 #include <linux/cn_proc.h>
 #include <linux/compiler.h>
-#include <linux/oom.h>
-#include <linux/capability.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -73,18 +71,9 @@ static int sig_task_ignored(struct task_struct *t, int sig, bool force)
 
 	handler = sig_handler(t, sig);
 
-	/* SIGKILL and SIGSTOP may not be sent to the global init */
-	if (unlikely(is_global_init(t) && sig_kernel_only(sig)))
-		return true;
-
 	if (unlikely(t->signal->flags & SIGNAL_UNKILLABLE) &&
 	    handler == SIG_DFL && !(force && sig_kernel_only(sig)))
 		return 1;
-
-	/* Only allow kernel generated signals to this kthread */
-	if (unlikely((t->flags & PF_KTHREAD) &&
-		     (handler == SIG_KTHREAD_KERNEL) && !force))
-		return true;
 
 	return sig_handler_ignored(handler, sig);
 }
@@ -1226,7 +1215,6 @@ int do_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
 	unsigned long flags;
 	int ret = -ESRCH;
 
-        //huruihuan add for kill task in D status
 	if(sig == SIGKILL) {
 		if(p && p->flags & PF_FROZEN) {
 		struct task_struct *child = p;
@@ -1361,11 +1349,8 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p)
 	ret = check_kill_permission(sig, info, p);
 	rcu_read_unlock();
 
-	if (!ret && sig) {
+	if (!ret && sig)
 		ret = do_send_sig_info(sig, info, p, true);
-		if (capable(CAP_KILL) && sig == SIGKILL)
-			add_to_oom_reaper(p);
-	}
 
 	return ret;
 }

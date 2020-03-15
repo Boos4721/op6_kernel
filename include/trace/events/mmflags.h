@@ -72,34 +72,22 @@
 #else
 #define IF_HAVE_PG_HWPOISON(flag,string)
 #endif
-#ifdef CONFIG_MEMPLUS
-#define IF_HAVE_PG_WILLNEED(flag, string) ,{1UL << flag, string}
-#else
-#define IF_HAVE_PG_WILLNEED(flag, string)
-#endif
 
 #if defined(CONFIG_IDLE_PAGE_TRACKING) && defined(CONFIG_64BIT)
 #define IF_HAVE_PG_IDLE(flag,string) ,{1UL << flag, string}
 #else
 #define IF_HAVE_PG_IDLE(flag,string)
 #endif
-
-#ifdef CONFIG_SMART_BOOST
-#define IF_HAVE_PG_UIDRU(flag, string) ,{1UL << flag, string}
-#else
-#define IF_HAVE_PG_UIDRU(flag, string)
-#endif
+#define IF_HAVE_PG_UIDRU(flag,string) ,{1UL << flag, string}
 
 #define __def_pageflag_names						\
 	{1UL << PG_locked,		"locked"	},		\
-	{1UL << PG_waiters,		"waiters"	},		\
 	{1UL << PG_error,		"error"		},		\
 	{1UL << PG_referenced,		"referenced"	},		\
 	{1UL << PG_uptodate,		"uptodate"	},		\
 	{1UL << PG_dirty,		"dirty"		},		\
 	{1UL << PG_lru,			"lru"		},		\
 	{1UL << PG_active,		"active"	},		\
-	{1UL << PG_workingset,		"workingset"	},		\
 	{1UL << PG_slab,		"slab"		},		\
 	{1UL << PG_owner_priv_1,	"owner_priv_1"	},		\
 	{1UL << PG_arch_1,		"arch_1"	},		\
@@ -117,11 +105,9 @@ IF_HAVE_PG_MLOCK(PG_mlocked,		"mlocked"	)		\
 IF_HAVE_PG_UNCACHED(PG_uncached,	"uncached"	)		\
 IF_HAVE_PG_HWPOISON(PG_hwpoison,	"hwpoison"	)		\
 IF_HAVE_PG_IDLE(PG_young,		"young"		)		\
-IF_HAVE_PG_IDLE(PG_idle,		"idle"		)		\
-/* CONFIG_MEMPLUS add by bin.zhong@ASTI */	\
-IF_HAVE_PG_WILLNEED(PG_willneed,	"willneed")	\
-/* CONFIG_SMART_BOOST add by bin.zhong@ASTI */	\
-IF_HAVE_PG_UIDRU(PG_uidlru,		"uidlru")
+IF_HAVE_PG_IDLE(PG_idle,		"idle"		)			\
+IF_HAVE_PG_UIDRU(PG_uidlru,	"uidlru")
+
 
 #define show_page_flags(flags)						\
 	(flags) ? __print_flags(flags, "|",				\

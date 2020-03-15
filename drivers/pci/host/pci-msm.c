@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -633,7 +633,6 @@ struct msm_pcie_dev_t {
 	bool				use_pinctrl;
 	struct pinctrl			*pinctrl;
 	struct pinctrl_state		*pins_default;
-	struct pinctrl_state            *pins_power_on;
 	struct pinctrl_state		*pins_sleep;
 	struct msm_pcie_device_info   pcidev_table[MAX_DEVICE_NUM];
 };
@@ -3758,7 +3757,7 @@ static int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 
 	/* assert PCIe reset link to keep EP in reset */
 
-	PCIE_DBG(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
+	PCIE_INFO(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
 		dev->rc_idx);
 	gpio_set_value(dev->gpio[MSM_PCIE_GPIO_PERST].num,
 				dev->gpio[MSM_PCIE_GPIO_PERST].on);
@@ -3881,7 +3880,7 @@ static int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 		dev->rc_idx, retries);
 
 	if (pcie_phy_is_ready(dev))
-		PCIE_DBG(dev, "PCIe RC%d PHY is ready!\n", dev->rc_idx);
+		PCIE_INFO(dev, "PCIe RC%d PHY is ready!\n", dev->rc_idx);
 	else {
 		PCIE_ERR(dev, "PCIe PHY RC%d failed to come up!\n",
 			dev->rc_idx);
@@ -3899,7 +3898,7 @@ static int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 
 	/* de-assert PCIe reset link to bring EP out of reset */
 
-	PCIE_DBG(dev, "PCIe: Release the reset of endpoint of RC%d.\n",
+	PCIE_INFO(dev, "PCIe: Release the reset of endpoint of RC%d.\n",
 		dev->rc_idx);
 	gpio_set_value(dev->gpio[MSM_PCIE_GPIO_PERST].num,
 				1 - dev->gpio[MSM_PCIE_GPIO_PERST].on);
@@ -3944,9 +3943,9 @@ static int msm_pcie_enable(struct msm_pcie_dev_t *dev, u32 options)
 		msm_pcie_confirm_linkup(dev, false, false, NULL)) {
 		PCIE_DBG(dev, "Link is up after %d checkings\n",
 			link_check_count);
-		PCIE_DBG(dev, "PCIe RC%d link initialized\n", dev->rc_idx);
+		PCIE_INFO(dev, "PCIe RC%d link initialized\n", dev->rc_idx);
 	} else {
-		PCIE_DBG(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
+		PCIE_INFO(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
 			dev->rc_idx);
 		gpio_set_value(dev->gpio[MSM_PCIE_GPIO_PERST].num,
 			dev->gpio[MSM_PCIE_GPIO_PERST].on);
@@ -4050,7 +4049,7 @@ static void msm_pcie_disable(struct msm_pcie_dev_t *dev, u32 options)
 	dev->power_on = false;
 	dev->link_turned_off_counter++;
 
-	PCIE_DBG(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
+	PCIE_INFO(dev, "PCIe: Assert the reset of endpoint of RC%d.\n",
 		dev->rc_idx);
 
 	gpio_set_value(dev->gpio[MSM_PCIE_GPIO_PERST].num,
@@ -5192,7 +5191,7 @@ static int32_t msm_pcie_irq_init(struct msm_pcie_dev_t *dev)
 		rc = devm_request_irq(pdev,
 			dev->irq[MSM_PCIE_INT_MSI].num,
 			handle_msi_irq,
-			IRQF_TRIGGER_RISING,
+			IRQF_TRIGGER_RISING | IRQF_NO_THREAD,
 			dev->irq[MSM_PCIE_INT_MSI].name,
 			dev);
 		if (rc) {
@@ -5520,7 +5519,7 @@ static void msm_pcie_config_link_pm_rc(struct msm_pcie_dev_t *dev,
 {
 	bool child_l0s_enable = 0, child_l1_enable = 0, child_l1ss_enable = 0;
 
-	if (!pdev->subordinate) {
+	if (!pdev->subordinate || !(&pdev->subordinate->devices)) {
 		PCIE_DBG(dev,
 			"PCIe: RC%d: no device connected to root complex\n",
 			dev->rc_idx);
@@ -6013,16 +6012,6 @@ static int msm_pcie_probe(struct platform_device *pdev)
 			msm_pcie_dev[rc_idx].pins_default = NULL;
 		}
 
-		msm_pcie_dev[rc_idx].pins_power_on =
-		pinctrl_lookup_state(msm_pcie_dev[rc_idx].pinctrl,
-				"slot_power_on");
-		if (IS_ERR(msm_pcie_dev[rc_idx].pins_power_on)) {
-			PCIE_ERR(&msm_pcie_dev[rc_idx],
-				"PCIe: RC%d could not get pinctrl power_on state\n",
-				rc_idx);
-			msm_pcie_dev[rc_idx].pins_power_on = NULL;
-		}
-
 		msm_pcie_dev[rc_idx].pins_sleep =
 			pinctrl_lookup_state(msm_pcie_dev[rc_idx].pinctrl,
 						"sleep");
@@ -6050,11 +6039,6 @@ static int msm_pcie_probe(struct platform_device *pdev)
 	msm_pcie_sysfs_init(&msm_pcie_dev[rc_idx]);
 
 	msm_pcie_dev[rc_idx].drv_ready = true;
-	if (msm_pcie_dev[rc_idx].use_pinctrl &&
-		msm_pcie_dev[rc_idx].pins_power_on) {
-		pinctrl_select_state(msm_pcie_dev[rc_idx].pinctrl,
-			msm_pcie_dev[rc_idx].pins_power_on);
-	}
 
 	if (msm_pcie_dev[rc_idx].boot_option &
 			MSM_PCIE_NO_PROBE_ENUMERATION) {

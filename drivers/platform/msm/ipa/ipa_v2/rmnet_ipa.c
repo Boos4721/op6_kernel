@@ -53,7 +53,6 @@
 
 #define IPA_WWAN_DEV_NAME "rmnet_ipa%d"
 #define IPA_UPSTEAM_WLAN_IFACE_NAME "wlan0"
-#define IPA_UPSTEAM_WLAN1_IFACE_NAME "wlan1"
 
 #define IPA_WWAN_DEVICE_COUNT (1)
 
@@ -691,7 +690,7 @@ static int wwan_add_ul_flt_rule_to_ipa(void)
 	/* send ipa_fltr_installed_notif_req_msg_v01 to Q6*/
 	req->source_pipe_index =
 		ipa2_get_ep_mapping(IPA_CLIENT_APPS_LAN_WAN_PROD);
-	req->install_status = IPA_QMI_RESULT_SUCCESS_V01;
+	req->install_status = QMI_RESULT_SUCCESS_V01;
 	req->filter_index_list_len = num_q6_rule;
 	mutex_lock(&ipa_qmi_lock);
 	for (i = 0; i < num_q6_rule; i++) {
@@ -791,8 +790,7 @@ static enum ipa_upstream_type find_upstream_type(const char *upstreamIface)
 			return IPA_UPSTEAM_MODEM;
 	}
 
-	if ((strcmp(IPA_UPSTEAM_WLAN_IFACE_NAME, upstreamIface) == 0) ||
-		(strcmp(IPA_UPSTEAM_WLAN1_IFACE_NAME, upstreamIface) == 0))
+	if (strcmp(IPA_UPSTEAM_WLAN_IFACE_NAME, upstreamIface) == 0)
 		return IPA_UPSTEAM_WLAN;
 	else
 		return IPA_UPSTEAM_MAX;
@@ -2307,12 +2305,6 @@ static int rmnet_ipa_ap_suspend(struct device *dev)
 
 	/* Make sure that there is no Tx operation ongoing */
 	netif_tx_lock_bh(netdev);
-	netif_stop_queue(netdev);
-
-	/* Stoppig Watch dog timer when pipe was in suspend state */
-	if (del_timer(&netdev->watchdog_timer))
-		dev_put(netdev);
-
 	ipa_rm_release_resource(IPA_RM_RESOURCE_WWAN_0_PROD);
 	netif_tx_unlock_bh(netdev);
 	IPAWANDBG_LOW("Exit\n");
@@ -2335,12 +2327,7 @@ static int rmnet_ipa_ap_resume(struct device *dev)
 	struct net_device *netdev = ipa_netdevs[0];
 
 	IPAWANDBG_LOW("Enter...\n");
-	if (netdev) {
-		netif_wake_queue(netdev);
-		/* Starting Watch dog timer, pipe was changes to resume state */
-		if (netif_running(netdev) && netdev->watchdog_timeo <= 0)
-			__netdev_watchdog_up(netdev);
-	}
+	netif_wake_queue(netdev);
 	IPAWANDBG_LOW("Exit\n");
 
 	return 0;
@@ -3066,8 +3053,7 @@ int rmnet_ipa_query_tethering_stats_all(
 		rc = rmnet_ipa_query_tethering_stats_wifi(
 			&tether_stats, data->reset_stats);
 		if (rc) {
-			IPAWANERR_RL(
-				"wlan WAN_IOC_QUERY_TETHER_STATS failed\n");
+			IPAWANERR("wlan WAN_IOC_QUERY_TETHER_STATS failed\n");
 			return rc;
 		}
 		data->tx_bytes = tether_stats.ipv4_tx_bytes

@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -166,19 +166,14 @@ void coresight_cti_ctx_save(void)
 out:
 		spin_lock_irqsave(&drvdata->spinlock, flag);
 		drvdata->l2_off = true;
-		if (drvdata->refcnt) {
-			drvdata->state->cticontrol =
-					cti_readl(drvdata, CTICONTROL);
-			drvdata->state->ctiappset =
-					cti_readl(drvdata, CTIAPPSET);
-			drvdata->state->ctigate =
-					cti_readl(drvdata, CTIGATE);
-			for (trig = 0; trig < CTI_MAX_TRIGGERS; trig++) {
-				drvdata->state->ctiinen[trig] =
-					cti_readl(drvdata, CTIINEN(trig));
-				drvdata->state->ctiouten[trig] =
-					cti_readl(drvdata, CTIOUTEN(trig));
-			}
+		drvdata->state->cticontrol = cti_readl(drvdata, CTICONTROL);
+		drvdata->state->ctiappset = cti_readl(drvdata, CTIAPPSET);
+		drvdata->state->ctigate = cti_readl(drvdata, CTIGATE);
+		for (trig = 0; trig < CTI_MAX_TRIGGERS; trig++) {
+			drvdata->state->ctiinen[trig] =
+				cti_readl(drvdata, CTIINEN(trig));
+			drvdata->state->ctiouten[trig] =
+				cti_readl(drvdata, CTIOUTEN(trig));
 		}
 		spin_unlock_irqrestore(&drvdata->spinlock, flag);
 	}
@@ -214,22 +209,17 @@ void coresight_cti_ctx_restore(void)
 		continue;
 out:
 		spin_lock_irqsave(&drvdata->spinlock, flag);
-		if (drvdata->refcnt) {
-			CTI_UNLOCK(drvdata);
-			cti_writel(drvdata, drvdata->state->ctiappset,
-				CTIAPPSET);
-			cti_writel(drvdata, drvdata->state->ctigate,
-				CTIGATE);
-			for (trig = 0; trig < CTI_MAX_TRIGGERS; trig++) {
-				cti_writel(drvdata,
-				drvdata->state->ctiinen[trig], CTIINEN(trig));
-				cti_writel(drvdata,
-				drvdata->state->ctiouten[trig], CTIOUTEN(trig));
-			}
-			cti_writel(drvdata, drvdata->state->cticontrol,
-				CTICONTROL);
-			CTI_LOCK(drvdata);
+		CTI_UNLOCK(drvdata);
+		cti_writel(drvdata, drvdata->state->ctiappset, CTIAPPSET);
+		cti_writel(drvdata, drvdata->state->ctigate, CTIGATE);
+		for (trig = 0; trig < CTI_MAX_TRIGGERS; trig++) {
+			cti_writel(drvdata, drvdata->state->ctiinen[trig],
+				   CTIINEN(trig));
+			cti_writel(drvdata, drvdata->state->ctiouten[trig],
+				   CTIOUTEN(trig));
 		}
+		cti_writel(drvdata, drvdata->state->cticontrol, CTICONTROL);
+		CTI_LOCK(drvdata);
 		drvdata->l2_off = false;
 		spin_unlock_irqrestore(&drvdata->spinlock, flag);
 	}
@@ -390,10 +380,8 @@ int coresight_cti_map_trigin(struct coresight_cti *cti, int trig, int ch)
 	 */
 	if (drvdata->refcnt == 0) {
 		ret = pm_runtime_get_sync(drvdata->dev);
-		if (ret < 0) {
-			pm_runtime_put(drvdata->dev);
+		if (ret)
 			goto err1;
-		}
 	}
 
 	spin_lock_irqsave(&drvdata->spinlock, flag);
@@ -476,10 +464,8 @@ int coresight_cti_map_trigout(struct coresight_cti *cti, int trig, int ch)
 	 */
 	if (drvdata->refcnt == 0) {
 		ret = pm_runtime_get_sync(drvdata->dev);
-		if (ret < 0) {
-			pm_runtime_put(drvdata->dev);
+		if (ret)
 			goto err1;
-		}
 	}
 
 	spin_lock_irqsave(&drvdata->spinlock, flag);
@@ -1483,6 +1469,11 @@ static int cti_probe(struct amba_device *adev, const struct amba_id *id)
 
 		drvdata->cti_hwclk = of_property_read_bool(adev->dev.of_node,
 							   "qcom,cti-hwclk");
+	}
+	if (drvdata->cti_save && !drvdata->cti_hwclk) {
+		ret = pm_runtime_get_sync(drvdata->dev);
+		if (ret)
+			return ret;
 	}
 
 	mutex_lock(&cti_lock);

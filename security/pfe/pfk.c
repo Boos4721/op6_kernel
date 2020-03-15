@@ -75,8 +75,7 @@ typedef int (*pfk_parse_inode_type)(const struct bio *bio,
 	const struct inode *inode,
 	struct pfk_key_info *key_info,
 	enum ice_cryto_algo_mode *algo,
-	bool *is_pfe,
-	const char *storage_type);
+	bool *is_pfe);
 
 typedef bool (*pfk_allow_merge_bio_type)(const struct bio *bio1,
 	const struct bio *bio2, const struct inode *inode1,
@@ -221,7 +220,11 @@ static struct inode *pfk_bio_get_inode(const struct bio *bio)
 	if (!page_mapping(bio->bi_io_vec->bv_page))
 		return NULL;
 
-	return page_mapping(bio->bi_io_vec->bv_page)->host;
+	if (!bio->bi_io_vec->bv_page->mapping->host)
+
+		return NULL;
+
+	return bio->bi_io_vec->bv_page->mapping->host;
 }
 
 /**
@@ -282,37 +285,28 @@ bool pfe_is_inode_filesystem_type(const struct inode *inode,
 static int pfk_get_key_for_bio(const struct bio *bio,
 		struct pfk_key_info *key_info,
 		enum ice_cryto_algo_mode *algo_mode,
-		bool *is_pfe, unsigned int *data_unit)
+		bool *is_pfe)
 {
 	const struct inode *inode;
 	enum pfe_type which_pfe;
-	char *s_type = NULL;
-	const struct blk_encryption_key *key = NULL;
+	const struct blk_encryption_key *key;
 
 	inode = pfk_bio_get_inode(bio);
 	which_pfe = pfk_get_pfe_type(inode);
-	s_type = (char *)pfk_kc_get_storage_type();
-
-	if (data_unit && (bio_dun(bio) ||
-			!memcmp(s_type, "ufs", strlen("ufs"))))
-		*data_unit = 1 << ICE_CRYPTO_DATA_UNIT_4_KB;
 
 	if (which_pfe != INVALID_PFE) {
 		/* Encrypted file; override ->bi_crypt_key */
 		pr_debug("parsing inode %lu with PFE type %d\n",
 			 inode->i_ino, which_pfe);
 		return (*(pfk_parse_inode_ftable[which_pfe]))
-				(bio, inode, key_info, algo_mode, is_pfe,
-					(const char *)s_type);
+				(bio, inode, key_info, algo_mode, is_pfe);
 	}
 
 	/*
 	 * bio is not for an encrypted file.  Use ->bi_crypt_key if it was set.
 	 * Otherwise, don't encrypt/decrypt the bio.
 	 */
-#ifdef CONFIG_DM_DEFAULT_KEY
 	key = bio->bi_crypt_key;
-#endif
 	if (!key) {
 		*is_pfe = false;
 		return -EINVAL;
@@ -352,13 +346,12 @@ static int pfk_get_key_for_bio(const struct bio *bio,
  */
 int pfk_load_key_start(const struct bio *bio,
 		struct ice_crypto_setting *ice_setting, bool *is_pfe,
-		bool async, int ice_rev)
+		bool async)
 {
 	int ret = 0;
 	struct pfk_key_info key_info = {NULL, NULL, 0, 0};
 	enum ice_cryto_algo_mode algo_mode = ICE_CRYPTO_ALGO_MODE_AES_XTS;
 	enum ice_crpto_key_size key_size_type = 0;
-	unsigned int data_unit = 1 << ICE_CRYPTO_DATA_UNIT_512_B;
 	u32 key_index = 0;
 
 	if (!is_pfe) {
@@ -381,8 +374,7 @@ int pfk_load_key_start(const struct bio *bio,
 		return -EINVAL;
 	}
 
-	ret = pfk_get_key_for_bio(bio, &key_info, &algo_mode, is_pfe,
-					&data_unit);
+	ret = pfk_get_key_for_bio(bio, &key_info, &algo_mode, is_pfe);
 
 	if (ret != 0)
 		return ret;
@@ -392,8 +384,7 @@ int pfk_load_key_start(const struct bio *bio,
 		return ret;
 
 	ret = pfk_kc_load_key_start(key_info.key, key_info.key_size,
-			key_info.salt, key_info.salt_size, &key_index, async,
-			data_unit, ice_rev);
+			key_info.salt, key_info.salt_size, &key_index, async);
 	if (ret) {
 		if (ret != -EBUSY && ret != -EAGAIN)
 			pr_err("start: could not load key into pfk key cache, error %d\n",
@@ -444,7 +435,7 @@ int pfk_load_key_end(const struct bio *bio, bool *is_pfe)
 	if (!pfk_is_ready())
 		return -ENODEV;
 
-	ret = pfk_get_key_for_bio(bio, &key_info, NULL, is_pfe, NULL);
+	ret = pfk_get_key_for_bio(bio, &key_info, NULL, is_pfe);
 	if (ret != 0)
 		return ret;
 
@@ -474,17 +465,12 @@ int pfk_load_key_end(const struct bio *bio, bool *is_pfe)
  */
 bool pfk_allow_merge_bio(const struct bio *bio1, const struct bio *bio2)
 {
-	const struct blk_encryption_key *key1 = NULL;
-	const struct blk_encryption_key *key2 = NULL;
+	const struct blk_encryption_key *key1;
+	const struct blk_encryption_key *key2;
 	const struct inode *inode1;
 	const struct inode *inode2;
 	enum pfe_type which_pfe1;
 	enum pfe_type which_pfe2;
-
-#ifdef CONFIG_DM_DEFAULT_KEY
-	key1 = bio1->bi_crypt_key;
-	key2 = bio2->bi_crypt_key;
-#endif
 
 	if (!pfk_is_ready())
 		return false;

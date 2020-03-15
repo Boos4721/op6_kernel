@@ -8,7 +8,8 @@
  * published by the Free Software Foundation.
  */
 
-/* Most of the functions in this file just waste time if DEBUG is not defined.
+/*
+ * Most of the functions in this file just waste time if DEBUG is not defined.
  * The matching xt_qtaguid_print.h will static inline empty funcs if the needed
  * debug flags ore not defined.
  * Those funcs that fail to allocate memory will panic as there is no need to
@@ -52,15 +53,33 @@ char *pp_tag_t(tag_t *tag)
 	return res;
 }
 
-char *pp_data_counters(struct data_counters *dc, bool showvalues)
+char *pp_data_counters(struct data_counters *dc, bool showValues)
 {
 	char *res;
 
 	if (!dc)
 		res = kasprintf(GFP_ATOMIC, "data_counters@null{}");
-	else if (showvalues)
-		res = kasprintf(GFP_ATOMIC,
-				"data_counters@%p{set0{rx{tcp{b=%llu, p=%llu}, udp{b=%llu, p=%llu},other{b=%llu, p=%llu}}, tx{tcp{b=%llu, p=%llu}, udp{b=%llu, p=%llu},other{b=%llu, p=%llu}}}, set1{rx{tcp{b=%llu, p=%llu}, udp{b=%llu, p=%llu},other{b=%llu, p=%llu}}, tx{tcp{b=%llu, p=%llu}, udp{b=%llu, p=%llu},other{b=%llu, p=%llu}}}}",
+	else if (showValues)
+		res = kasprintf(
+			GFP_ATOMIC, "data_counters@%p{"
+			"set0{"
+			"rx{"
+			"tcp{b=%llu, p=%llu}, "
+			"udp{b=%llu, p=%llu},"
+			"other{b=%llu, p=%llu}}, "
+			"tx{"
+			"tcp{b=%llu, p=%llu}, "
+			"udp{b=%llu, p=%llu},"
+			"other{b=%llu, p=%llu}}}, "
+			"set1{"
+			"rx{"
+			"tcp{b=%llu, p=%llu}, "
+			"udp{b=%llu, p=%llu},"
+			"other{b=%llu, p=%llu}}, "
+			"tx{"
+			"tcp{b=%llu, p=%llu}, "
+			"udp{b=%llu, p=%llu},"
+			"other{b=%llu, p=%llu}}}}",
 			dc,
 			dc->bpc[0][IFS_RX][IFS_TCP].bytes,
 			dc->bpc[0][IFS_RX][IFS_TCP].packets,
@@ -158,14 +177,30 @@ char *pp_tag_stat(struct tag_stat *ts)
 char *pp_iface_stat(struct iface_stat *is)
 {
 	char *res;
-
 	if (!is) {
 		res = kasprintf(GFP_ATOMIC, "iface_stat@null{}");
 	} else {
 		struct data_counters *cnts = &is->totals_via_skb;
-
-		res = kasprintf(GFP_ATOMIC,
-				"iface_stat@%p{list=list_head{...}, ifname=%s, total_dev={rx={bytes=%llu, packets=%llu}, tx={bytes=%llu, packets=%llu}}, total_skb={rx={bytes=%llu, packets=%llu}, tx={bytes=%llu, packets=%llu}}, last_known_valid=%d, last_known={rx={bytes=%llu, packets=%llu}, tx={bytes=%llu, packets=%llu}}, active=%d, net_dev=%p, proc_ptr=%p, tag_stat_tree=rb_root{...}}",
+		res = kasprintf(GFP_ATOMIC, "iface_stat@%p{"
+				"list=list_head{...}, "
+				"ifname=%s, "
+				"total_dev={rx={bytes=%llu, "
+				"packets=%llu}, "
+				"tx={bytes=%llu, "
+				"packets=%llu}}, "
+				"total_skb={rx={bytes=%llu, "
+				"packets=%llu}, "
+				"tx={bytes=%llu, "
+				"packets=%llu}}, "
+				"last_known_valid=%d, "
+				"last_known={rx={bytes=%llu, "
+				"packets=%llu}, "
+				"tx={bytes=%llu, "
+				"packets=%llu}}, "
+				"active=%d, "
+				"net_dev=%p, "
+				"proc_ptr=%p, "
+				"tag_stat_tree=rb_root{...}}",
 				is,
 				is->ifname,
 				is->totals_via_dev[IFS_RX].bytes,
@@ -200,8 +235,10 @@ char *pp_sock_tag(struct sock_tag *st)
 		return res;
 	}
 	tag_str = pp_tag_t(&st->tag);
-	res = kasprintf(GFP_ATOMIC,
-			"sock_tag@%p{sock_node=rb_node{...}, sk=%p (f_count=%d), list=list_head{...}, pid=%u, tag=%s}",
+	res = kasprintf(GFP_ATOMIC, "sock_tag@%p{"
+			"sock_node=rb_node{...}, "
+			"sk=%p (f_count=%d), list=list_head{...}, "
+			"pid=%u, tag=%s}",
 			st, st->sk, atomic_read(
 				&st->sk->sk_refcnt),
 			st->pid, tag_str);
@@ -217,8 +254,11 @@ char *pp_uid_tag_data(struct uid_tag_data *utd)
 	if (!utd)
 		res = kasprintf(GFP_ATOMIC, "uid_tag_data@null{}");
 	else
-		res = kasprintf(GFP_ATOMIC,
-				"uid_tag_data@%p{uid=%u, num_active_acct_tags=%d, num_pqd=%d, tag_node_tree=rb_root{...}, proc_qtu_data_tree=rb_root{...}}",
+		res = kasprintf(GFP_ATOMIC, "uid_tag_data@%p{"
+				"uid=%u, num_active_acct_tags=%d, "
+				"num_pqd=%d, "
+				"tag_node_tree=rb_root{...}, "
+				"proc_qtu_data_tree=rb_root{...}}",
 				utd, utd->uid,
 				utd->num_active_tags, utd->num_pqd);
 	_bug_on_err_or_null(res);
@@ -236,8 +276,10 @@ char *pp_proc_qtu_data(struct proc_qtu_data *pqd)
 		return res;
 	}
 	parent_tag_data_str = pp_uid_tag_data(pqd->parent_tag_data);
-	res = kasprintf(GFP_ATOMIC,
-			"proc_qtu_data@%p{node=rb_node{...}, pid=%u, parent_tag_data=%s, sock_tag_list=list_head{...}}",
+	res = kasprintf(GFP_ATOMIC, "proc_qtu_data@%p{"
+			"node=rb_node{...}, pid=%u, "
+			"parent_tag_data=%s, "
+			"sock_tag_list=list_head{...}}",
 			pqd, pqd->pid, parent_tag_data_str
 		);
 	_bug_on_err_or_null(res);
@@ -258,24 +300,24 @@ void prdebug_sock_tag_tree(int indent_level,
 
 	if (RB_EMPTY_ROOT(sock_tag_tree)) {
 		str = "sock_tag_tree=rb_root{}";
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 		return;
 	}
 
 	str = "sock_tag_tree=rb_root{";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 	indent_level++;
 	for (node = rb_first(sock_tag_tree);
 	     node;
 	     node = rb_next(node)) {
 		sock_tag_entry = rb_entry(node, struct sock_tag, sock_node);
 		str = pp_sock_tag(sock_tag_entry);
-		pr_debug("%*d: %s,\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s,\n", indent_level*2, indent_level, str);
 		kfree(str);
 	}
 	indent_level--;
 	str = "}";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 }
 
 void prdebug_sock_tag_list(int indent_level,
@@ -289,21 +331,21 @@ void prdebug_sock_tag_list(int indent_level,
 
 	if (list_empty(sock_tag_list)) {
 		str = "sock_tag_list=list_head{}";
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 		return;
 	}
 
 	str = "sock_tag_list=list_head{";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 	indent_level++;
 	list_for_each_entry(sock_tag_entry, sock_tag_list, list) {
 		str = pp_sock_tag(sock_tag_entry);
-		pr_debug("%*d: %s,\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s,\n", indent_level*2, indent_level, str);
 		kfree(str);
 	}
 	indent_level--;
 	str = "}";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 }
 
 void prdebug_proc_qtu_data_tree(int indent_level,
@@ -318,12 +360,12 @@ void prdebug_proc_qtu_data_tree(int indent_level,
 
 	if (RB_EMPTY_ROOT(proc_qtu_data_tree)) {
 		str = "proc_qtu_data_tree=rb_root{}";
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 		return;
 	}
 
 	str = "proc_qtu_data_tree=rb_root{";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 	indent_level++;
 	for (node = rb_first(proc_qtu_data_tree);
 	     node;
@@ -332,17 +374,18 @@ void prdebug_proc_qtu_data_tree(int indent_level,
 					       struct proc_qtu_data,
 					       node);
 		str = pp_proc_qtu_data(proc_qtu_data_entry);
-		pr_debug("%*d: %s,\n", indent_level * 2, indent_level,
+		pr_debug("%*d: %s,\n", indent_level*2, indent_level,
 			 str);
 		kfree(str);
 		indent_level++;
 		prdebug_sock_tag_list(indent_level,
 				      &proc_qtu_data_entry->sock_tag_list);
 		indent_level--;
+
 	}
 	indent_level--;
 	str = "}";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 }
 
 void prdebug_tag_ref_tree(int indent_level, struct rb_root *tag_ref_tree)
@@ -356,12 +399,12 @@ void prdebug_tag_ref_tree(int indent_level, struct rb_root *tag_ref_tree)
 
 	if (RB_EMPTY_ROOT(tag_ref_tree)) {
 		str = "tag_ref_tree{}";
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 		return;
 	}
 
 	str = "tag_ref_tree{";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 	indent_level++;
 	for (node = rb_first(tag_ref_tree);
 	     node;
@@ -370,13 +413,13 @@ void prdebug_tag_ref_tree(int indent_level, struct rb_root *tag_ref_tree)
 					 struct tag_ref,
 					 tn.node);
 		str = pp_tag_ref(tag_ref_entry);
-		pr_debug("%*d: %s,\n", indent_level * 2, indent_level,
+		pr_debug("%*d: %s,\n", indent_level*2, indent_level,
 			 str);
 		kfree(str);
 	}
 	indent_level--;
 	str = "}";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 }
 
 void prdebug_uid_tag_data_tree(int indent_level,
@@ -391,12 +434,12 @@ void prdebug_uid_tag_data_tree(int indent_level,
 
 	if (RB_EMPTY_ROOT(uid_tag_data_tree)) {
 		str = "uid_tag_data_tree=rb_root{}";
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 		return;
 	}
 
 	str = "uid_tag_data_tree=rb_root{";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 	indent_level++;
 	for (node = rb_first(uid_tag_data_tree);
 	     node;
@@ -404,23 +447,22 @@ void prdebug_uid_tag_data_tree(int indent_level,
 		uid_tag_data_entry = rb_entry(node, struct uid_tag_data,
 					      node);
 		str = pp_uid_tag_data(uid_tag_data_entry);
-		pr_debug("%*d: %s,\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s,\n", indent_level*2, indent_level, str);
 		kfree(str);
 		if (!RB_EMPTY_ROOT(&uid_tag_data_entry->tag_ref_tree)) {
 			indent_level++;
 			prdebug_tag_ref_tree(indent_level,
-					     &uid_tag_data_entry->
-					     tag_ref_tree);
+					     &uid_tag_data_entry->tag_ref_tree);
 			indent_level--;
 		}
 	}
 	indent_level--;
 	str = "}";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 }
 
 void prdebug_tag_stat_tree(int indent_level,
-			   struct rb_root *tag_stat_tree)
+				  struct rb_root *tag_stat_tree)
 {
 	char *str;
 	struct rb_node *node;
@@ -431,25 +473,25 @@ void prdebug_tag_stat_tree(int indent_level,
 
 	if (RB_EMPTY_ROOT(tag_stat_tree)) {
 		str = "tag_stat_tree{}";
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 		return;
 	}
 
 	str = "tag_stat_tree{";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 	indent_level++;
 	for (node = rb_first(tag_stat_tree);
 	     node;
 	     node = rb_next(node)) {
 		ts_entry = rb_entry(node, struct tag_stat, tn.node);
 		str = pp_tag_stat(ts_entry);
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level,
+		pr_debug("%*d: %s\n", indent_level*2, indent_level,
 			 str);
 		kfree(str);
 	}
 	indent_level--;
 	str = "}";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 }
 
 void prdebug_iface_stat_list(int indent_level,
@@ -463,16 +505,16 @@ void prdebug_iface_stat_list(int indent_level,
 
 	if (list_empty(iface_stat_list)) {
 		str = "iface_stat_list=list_head{}";
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 		return;
 	}
 
 	str = "iface_stat_list=list_head{";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 	indent_level++;
 	list_for_each_entry(iface_entry, iface_stat_list, list) {
 		str = pp_iface_stat(iface_entry);
-		pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+		pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 		kfree(str);
 
 		spin_lock_bh(&iface_entry->tag_stat_list_lock);
@@ -486,7 +528,7 @@ void prdebug_iface_stat_list(int indent_level,
 	}
 	indent_level--;
 	str = "}";
-	pr_debug("%*d: %s\n", indent_level * 2, indent_level, str);
+	pr_debug("%*d: %s\n", indent_level*2, indent_level, str);
 }
 
 #endif  /* ifdef DDEBUG */
@@ -517,8 +559,8 @@ static const char * const netdev_event_strings[] = {
 
 const char *netdev_evt_str(int netdev_event)
 {
-	if (netdev_event < 0 ||
-	    netdev_event >= ARRAY_SIZE(netdev_event_strings))
+	if (netdev_event < 0
+	    || netdev_event >= ARRAY_SIZE(netdev_event_strings))
 		return "bad event num";
 	return netdev_event_strings[netdev_event];
 }

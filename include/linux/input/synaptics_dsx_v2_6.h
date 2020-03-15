@@ -114,7 +114,6 @@ struct synaptics_dsx_board_data {
 	const char *bus_reg_name;
 	struct synaptics_dsx_button_map *cap_button_map;
 	struct synaptics_dsx_button_map *vir_button_map;
-	const char *fw_name;
 };
 
 #endif

@@ -26,24 +26,18 @@
 #include <linux/suspend.h>
 #include <linux/syscore_ops.h>
 #include <linux/ftrace.h>
-#include <linux/rtc.h>
 #include <trace/events/power.h>
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
 #include <linux/wakeup_reason.h>
-#include <linux/gpio.h>
 
 #include "power.h"
-
-
-#define PROC_AWAKE_ID 12 /* 12th bit */
 
 const char *pm_labels[] = { "mem", "standby", "freeze", NULL };
 const char *pm_states[PM_SUSPEND_MAX];
 
 unsigned int pm_suspend_global_flags;
 EXPORT_SYMBOL_GPL(pm_suspend_global_flags);
-
 
 static const struct platform_suspend_ops *suspend_ops;
 static const struct platform_freeze_ops *freeze_ops;
@@ -549,18 +543,6 @@ static int enter_state(suspend_state_t state)
 	return error;
 }
 
-static void pm_suspend_marker(char *annotation)
-{
-	struct timespec ts;
-	struct rtc_time tm;
-
-	getnstimeofday(&ts);
-	rtc_time_to_tm(ts.tv_sec, &tm);
-	pr_info("PM: suspend %s %d-%02d-%02d %02d:%02d:%02d.%09lu UTC\n",
-		annotation, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-		tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec);
-}
-
 /**
  * pm_suspend - Externally visible function for suspending the system.
  * @state: System sleep state to enter.
@@ -575,20 +557,13 @@ int pm_suspend(suspend_state_t state)
 	if (state <= PM_SUSPEND_ON || state >= PM_SUSPEND_MAX)
 		return -EINVAL;
 
-	pm_suspend_marker("entry");
-	gpio_set_value(slst_gpio_base_id + PROC_AWAKE_ID, 0);
-	pr_err("%s: PM_SUSPEND_PREPARE smp2p_change_state", __func__);
 	error = enter_state(state);
-	gpio_set_value(slst_gpio_base_id + PROC_AWAKE_ID, 1);
-	pr_err("%s: PM_POST_SUSPEND smp2p_change_state", __func__);
-
 	if (error) {
 		suspend_stats.fail++;
 		dpm_save_failed_errno(error);
 	} else {
 		suspend_stats.success++;
 	}
-	pm_suspend_marker("exit");
 	return error;
 }
 EXPORT_SYMBOL(pm_suspend);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2019 The Linux Foundation. All rights reserved.
+ * Copyright (C) 2014-2018 The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -2843,8 +2843,6 @@ void sde_plane_clear_multirect(const struct drm_plane_state *drm_state)
 	pstate->multirect_index = SDE_SSPP_RECT_SOLO;
 	pstate->multirect_mode = SDE_SSPP_MULTIRECT_NONE;
 }
-
-//xiaoxiaohuan@OnePlus.MultiMediaService, add for fingerprint
 int sde_plane_check_fingerprint_layer(const struct drm_plane_state *drm_state)
 {
 	struct sde_plane_state *pstate;
@@ -2856,7 +2854,6 @@ int sde_plane_check_fingerprint_layer(const struct drm_plane_state *drm_state)
 
 	return sde_plane_get_property(pstate, PLANE_PROP_CUSTOM);
 }
-
 /**
  * multi_rect validate API allows to validate only R0 and R1 RECT
  * passing for each plane. Client of this API must not pass multiple
@@ -3839,7 +3836,6 @@ static int sde_plane_sspp_atomic_update(struct drm_plane *plane,
 			break;
 		case PLANE_PROP_MULTIRECT_MODE:
 		case PLANE_PROP_COLOR_FILL:
-		case PLANE_PROP_LAYOUT:
 			/* potentially need to refresh everything */
 			pstate->dirty = SDE_PLANE_DIRTY_ALL;
 			break;
@@ -3850,6 +3846,7 @@ static int sde_plane_sspp_atomic_update(struct drm_plane *plane,
 		case PLANE_PROP_ALPHA:
 		case PLANE_PROP_INPUT_FENCE:
 		case PLANE_PROP_BLEND_OP:
+
 		case PLANE_PROP_CUSTOM:
 			/* no special action required */
 			break;
@@ -4264,11 +4261,6 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 		{SDE_SSPP_MULTIRECT_PARALLEL, "parallel"},
 		{SDE_SSPP_MULTIRECT_TIME_MX,  "serial"},
 	};
-	static const struct drm_prop_enum_list e_layout_index[] = {
-		{SDE_SSPP_NONE, "none"},
-		{SDE_SSPP_LEFT, "left"},
-		{SDE_SSPP_RIGHT, "right"},
-	};
 	const struct sde_format_extended *format_list;
 	struct sde_kms_info *info;
 	struct sde_plane *psde = to_sde_plane(plane);
@@ -4291,7 +4283,7 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 	psde->catalog = catalog;
 
 	if (sde_is_custom_client()) {
-		if (catalog->mixer_count &&
+		if (catalog->mixer_count && catalog->mixer &&
 				catalog->mixer[0].sblk->maxblendstages) {
 			zpos_max = catalog->mixer[0].sblk->maxblendstages - 1;
 			if (zpos_max > SDE_STAGE_MAX - SDE_STAGE_0 - 1)
@@ -4305,10 +4297,9 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 	msm_property_install_range(&psde->property_info, "zpos",
 		0x0, 0, zpos_max, zpos_def, PLANE_PROP_ZPOS);
 
-	//xiaoxiaohuan@OnePlus.MultiMediaService, add for fingerprint
-	msm_property_install_range(&psde->property_info, "PLANE_CUST",
-			0x0, 0, INT_MAX, 0, PLANE_PROP_CUSTOM);
 
+    msm_property_install_range(&psde->property_info, "PLANE_CUST",
+		0x0, 0, INT_MAX, 0, PLANE_PROP_CUSTOM);
 	msm_property_install_range(&psde->property_info, "alpha",
 		0x0, 0, 255, 255, PLANE_PROP_ALPHA);
 
@@ -4394,9 +4385,6 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 
 	msm_property_install_enum(&psde->property_info, "src_config", 0x0, 1,
 		e_src_config, ARRAY_SIZE(e_src_config), PLANE_PROP_SRC_CONFIG);
-
-	msm_property_install_enum(&psde->property_info, "sspp_layout", 0x0, 0,
-		e_layout_index, ARRAY_SIZE(e_layout_index), PLANE_PROP_LAYOUT);
 
 	if (psde->pipe_hw->ops.setup_solidfill)
 		msm_property_install_range(&psde->property_info, "color_fill",

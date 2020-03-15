@@ -727,7 +727,7 @@ struct inode {
 	struct hlist_head	i_fsnotify_marks;
 #endif
 
-#ifdef CONFIG_FS_ENCRYPTION
+#if IS_ENABLED(CONFIG_FS_ENCRYPTION)
 	struct fscrypt_info	*i_crypt_info;
 #endif
 
@@ -1390,9 +1390,8 @@ struct super_block {
 	void                    *s_security;
 #endif
 	const struct xattr_handler **s_xattr;
-#ifdef CONFIG_FS_ENCRYPTION
+
 	const struct fscrypt_operations	*s_cop;
-#endif
 
 	struct hlist_bl_head	s_anon;		/* anonymous dentries for (nfs) exporting */
 	struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */
@@ -2580,6 +2579,8 @@ extern int __invalidate_device(struct block_device *, bool);
 extern int invalidate_partition(struct gendisk *, int);
 #endif
 unsigned long invalidate_mapping_pages(struct address_space *mapping,
+					pgoff_t start, pgoff_t end);
+unsigned long invalidate_mapping_pages_without_uidlru(struct address_space *mapping,
 					pgoff_t start, pgoff_t end);
 static inline void invalidate_remote_inode(struct inode *inode)
 {

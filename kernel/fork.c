@@ -78,7 +78,9 @@
 #include <linux/sysctl.h>
 #include <linux/kcov.h>
 #include <linux/cpufreq_times.h>
-#include <linux/simple_lmk.h>
+#include <linux/cpufreq.h>
+#include <linux/cpu_input_boost.h>
+#include <linux/devfreq_boost.h>
 
 #include <linux/adj_chain.h>
 
@@ -554,7 +556,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	tsk->splice_pipe = NULL;
 	tsk->task_frag.page = NULL;
 	tsk->wake_q.next = NULL;
-#ifdef CONFIG_OPCHAIN
+	/* Curtis, 20180109, opchain*/
 	tsk->utask_tag = 0;
 	tsk->utask_tag_base = 0;
 	tsk->etask_claim = 0;
@@ -562,8 +564,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	tsk->utask_slave = 0;
 	/*Curtis, 20180425, non-exist dcache*/
 	tsk->nn = NULL;
-#endif
-
 	account_kernel_stack(tsk, 1);
 
 	kcov_task_init(tsk);
@@ -786,8 +786,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->mmap = NULL;
 	mm->mm_rb = RB_ROOT;
 	mm->vmacache_seqnum = 0;
-	mm->va_feature = 0;
-	mm->zygoteheap_in_MB = 0;
 #ifdef CONFIG_SPECULATIVE_PAGE_FAULT
 	rwlock_init(&mm->mm_rb_lock);
 #endif
@@ -903,7 +901,6 @@ static inline void __mmput(struct mm_struct *mm)
 	ksm_exit(mm);
 	khugepaged_exit(mm); /* must run before exit_mmap */
 	exit_mmap(mm);
-	simple_lmk_mm_freed(mm);
 	mm_put_huge_zero_page(mm);
 	set_mm_exe_file(mm, NULL);
 	if (!list_empty(&mm->mmlist)) {
@@ -1415,10 +1412,6 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 	sig->has_child_subreaper = current->signal->has_child_subreaper ||
 				   current->signal->is_child_subreaper;
 
-	/* CONFIG_MEMPLUS add start by bin.zhong@ASTI */
-	memplus_init_task_reclaim_stat(sig);
-	/* add end */
-
 	mutex_init(&sig->cred_guard_mutex);
 
 	return 0;
@@ -1580,18 +1573,6 @@ static __latent_entropy struct task_struct *copy_process(
 
 	cpufreq_task_times_init(p);
 
-	/*
-	 * This _must_ happen before we call free_task(), i.e. before we jump
-	 * to any of the bad_fork_* labels. This is to avoid freeing
-	 * p->set_child_tid which is (ab)used as a kthread's data pointer for
-	 * kernel threads (PF_KTHREAD).
-	 */
-	p->set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? child_tidptr : NULL;
-	/*
-	 * Clear TID on mm_release()?
-	 */
-	p->clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? child_tidptr : NULL;
-
 	ftrace_graph_init_task(p);
 
 	rt_mutex_init_task(p);
@@ -1648,10 +1629,6 @@ static __latent_entropy struct task_struct *copy_process(
 #endif
 
 	p->default_timer_slack_ns = current->timer_slack_ns;
-
-#ifdef CONFIG_PSI
-	p->psi_flags = 0;
-#endif
 
 	task_io_accounting_init(&p->ioac);
 	acct_clear_integrals(p);
@@ -1894,7 +1871,7 @@ static __latent_entropy struct task_struct *copy_process(
 			/*Ted, 20180425, non-exist dcache*/
 			if (!(p->flags & PF_KTHREAD))
 				nn =
-				kmalloc(sizeof(struct nedf_node), __GFP_NOWARN);
+				kmalloc(sizeof(struct nedf_node), GFP_NOWAIT);
 		} else {
 			current->signal->nr_threads++;
 			atomic_inc(&current->signal->live);
@@ -1923,7 +1900,7 @@ static __latent_entropy struct task_struct *copy_process(
 	if (nn) {
 		p->nn = nn;
 		nn->nf =
-		kmalloc(sizeof(struct nedf) * FILE_MAP_NUM, __GFP_NOWARN);
+		kmalloc(sizeof(struct nedf) * FILE_MAP_NUM, GFP_NOWAIT);
 		nn->nf_cnt = 0;
 		nn->nf_index = 0;
 		nn->nf_tag = 0;
@@ -2026,6 +2003,12 @@ long _do_fork(unsigned long clone_flags,
 	int trace = 0;
 	long nr;
 
+	/* Boost CPU to the max for 50 ms when userspace launches an app */
+	if (task_is_zygote(current)) {
+		cpu_input_boost_kick_max(50);
+		devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, 50);
+	}
+
 	/*
 	 * Determine whether and which event to report to ptracer.  When
 	 * called from kernel_thread or CLONE_UNTRACED is explicitly
@@ -2059,8 +2042,8 @@ long _do_fork(unsigned long clone_flags,
 
 		trace_sched_process_fork(current, p);
 
-		/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-		SMB_HOT_COUNT_INIT((clone_flags & CLONE_VM), p);
+		if (!(clone_flags & CLONE_VM))
+			p->hot_count = 0;
 
 		pid = get_task_pid(p, PIDTYPE_PID);
 		nr = pid_vnr(pid);
@@ -2432,7 +2415,7 @@ int sysctl_max_threads(struct ctl_table *table, int write,
 	struct ctl_table t;
 	int ret;
 	int threads = max_threads;
-	int min = 1;
+	int min = MIN_THREADS;
 	int max = MAX_THREADS;
 
 	t = *table;
@@ -2444,7 +2427,7 @@ int sysctl_max_threads(struct ctl_table *table, int write,
 	if (ret || !write)
 		return ret;
 
-	max_threads = threads;
+	set_max_threads(threads);
 
 	return 0;
 }

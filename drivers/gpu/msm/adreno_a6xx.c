@@ -32,6 +32,17 @@
 
 #define MIN_HBB		13
 
+#define A6XX_LLC_NUM_GPU_SCIDS		5
+#define A6XX_GPU_LLC_SCID_NUM_BITS	5
+#define A6XX_GPU_LLC_SCID_MASK \
+	((1 << (A6XX_LLC_NUM_GPU_SCIDS * A6XX_GPU_LLC_SCID_NUM_BITS)) - 1)
+#define A6XX_GPUHTW_LLC_SCID_SHIFT	25
+#define A6XX_GPUHTW_LLC_SCID_MASK \
+	(((1 << A6XX_GPU_LLC_SCID_NUM_BITS) - 1) << A6XX_GPUHTW_LLC_SCID_SHIFT)
+
+#define A6XX_GPU_CX_REG_BASE		0x509E000
+#define A6XX_GPU_CX_REG_SIZE		0x1000
+
 #define GPU_LIMIT_THRESHOLD_ENABLE	BIT(31)
 
 static int _load_gmu_firmware(struct kgsl_device *device);
@@ -402,6 +413,8 @@ static void a6xx_pwrup_reglist_init(struct adreno_device *adreno_dev)
 
 static void a6xx_init(struct adreno_device *adreno_dev)
 {
+	a6xx_crashdump_init(adreno_dev);
+
 	/*
 	 * If the GMU is not enabled, rewrite the offset for the always on
 	 * counters to point to the CP always on instead of GMU always on
@@ -980,7 +993,6 @@ static void _set_ordinals(struct adreno_device *adreno_dev,
 static int a6xx_send_cp_init(struct adreno_device *adreno_dev,
 			 struct adreno_ringbuffer *rb)
 {
-	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	unsigned int *cmds;
 	int ret;
 
@@ -993,16 +1005,9 @@ static int a6xx_send_cp_init(struct adreno_device *adreno_dev,
 	_set_ordinals(adreno_dev, cmds, 11);
 
 	ret = adreno_ringbuffer_submit_spin(rb, NULL, 2000);
-	if (ret) {
+	if (ret)
 		adreno_spin_idle_debug(adreno_dev,
 				"CP initialization failed to idle\n");
-
-		if (!adreno_is_a3xx(adreno_dev))
-			kgsl_sharedmem_writel(device, &device->scratch,
-					SCRATCH_RPTR_OFFSET(rb->id), 0);
-		rb->wptr = 0;
-		rb->_wptr = 0;
-	}
 
 	return ret;
 }
@@ -1638,7 +1643,7 @@ static int a6xx_gfx_rail_on(struct kgsl_device *device)
 	unsigned int perf_idx;
 	int ret;
 
-	perf_idx = pwr->num_pwrlevels - pwr->default_pwrlevel - 1;
+	perf_idx = pwr->num_pwrlevels - 1;
 	default_opp = &gmu->rpmh_votes.gx_votes[perf_idx];
 
 	kgsl_gmu_regwrite(device, A6XX_GMU_BOOT_SLUMBER_OPTION,
@@ -1667,8 +1672,8 @@ static int a6xx_notify_slumber(struct kgsl_device *device)
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 	struct gmu_device *gmu = &device->gmu;
-	int bus_level = pwr->pwrlevels[pwr->default_pwrlevel].bus_freq;
-	int perf_idx = gmu->num_gpupwrlevels - pwr->default_pwrlevel - 1;
+	int bus_level = pwr->pwrlevels[pwr->num_pwrlevels - 1].bus_freq;
+	int perf_idx = gmu->num_gpupwrlevels - 1;
 	int ret, state;
 
 	/* Disable the power counter so that the GMU is not busy */
@@ -2517,6 +2522,24 @@ static void a6xx_err_callback(struct adreno_device *adreno_dev, int bit)
 	}
 }
 
+/* GPU System Cache control registers */
+#define A6XX_GPU_CX_MISC_SYSTEM_CACHE_CNTL_0   0x4
+#define A6XX_GPU_CX_MISC_SYSTEM_CACHE_CNTL_1   0x8
+
+static inline void _reg_rmw(void __iomem *regaddr,
+	unsigned int mask, unsigned int bits)
+{
+	unsigned int val = 0;
+
+	val = __raw_readl(regaddr);
+	/* Make sure the above read completes before we proceed  */
+	rmb();
+	val &= ~mask;
+	__raw_writel(val | bits, regaddr);
+	/* Make sure the above write posts before we proceed*/
+	wmb();
+}
+
 /*
  * a6xx_llc_configure_gpu_scid() - Program the sub-cache ID for all GPU blocks
  * @adreno_dev: The adreno device pointer
@@ -2526,15 +2549,17 @@ static void a6xx_llc_configure_gpu_scid(struct adreno_device *adreno_dev)
 	uint32_t gpu_scid;
 	uint32_t gpu_cntl1_val = 0;
 	int i;
+	void __iomem *gpu_cx_reg;
 
 	gpu_scid = adreno_llc_get_scid(adreno_dev->gpu_llc_slice);
 	for (i = 0; i < A6XX_LLC_NUM_GPU_SCIDS; i++)
 		gpu_cntl1_val = (gpu_cntl1_val << A6XX_GPU_LLC_SCID_NUM_BITS)
 			| gpu_scid;
 
-	adreno_cx_misc_regrmw(adreno_dev,
-			A6XX_GPU_CX_MISC_SYSTEM_CACHE_CNTL_1,
+	gpu_cx_reg = ioremap(A6XX_GPU_CX_REG_BASE, A6XX_GPU_CX_REG_SIZE);
+	_reg_rmw(gpu_cx_reg + A6XX_GPU_CX_MISC_SYSTEM_CACHE_CNTL_1,
 			A6XX_GPU_LLC_SCID_MASK, gpu_cntl1_val);
+	iounmap(gpu_cx_reg);
 }
 
 /*
@@ -2544,13 +2569,15 @@ static void a6xx_llc_configure_gpu_scid(struct adreno_device *adreno_dev)
 static void a6xx_llc_configure_gpuhtw_scid(struct adreno_device *adreno_dev)
 {
 	uint32_t gpuhtw_scid;
+	void __iomem *gpu_cx_reg;
 
 	gpuhtw_scid = adreno_llc_get_scid(adreno_dev->gpuhtw_llc_slice);
 
-	adreno_cx_misc_regrmw(adreno_dev,
-			A6XX_GPU_CX_MISC_SYSTEM_CACHE_CNTL_1,
+	gpu_cx_reg = ioremap(A6XX_GPU_CX_REG_BASE, A6XX_GPU_CX_REG_SIZE);
+	_reg_rmw(gpu_cx_reg + A6XX_GPU_CX_MISC_SYSTEM_CACHE_CNTL_1,
 			A6XX_GPUHTW_LLC_SCID_MASK,
 			gpuhtw_scid << A6XX_GPUHTW_LLC_SCID_SHIFT);
+	iounmap(gpu_cx_reg);
 }
 
 /*
@@ -2559,14 +2586,19 @@ static void a6xx_llc_configure_gpuhtw_scid(struct adreno_device *adreno_dev)
  */
 static void a6xx_llc_enable_overrides(struct adreno_device *adreno_dev)
 {
+	void __iomem *gpu_cx_reg;
+
 	/*
 	 * 0x3: readnoallocoverrideen=0
 	 *      read-no-alloc=0 - Allocate lines on read miss
 	 *      writenoallocoverrideen=1
 	 *      write-no-alloc=1 - Do not allocates lines on write miss
 	 */
-	adreno_cx_misc_regwrite(adreno_dev,
-			A6XX_GPU_CX_MISC_SYSTEM_CACHE_CNTL_0, 0x3);
+	gpu_cx_reg = ioremap(A6XX_GPU_CX_REG_BASE, A6XX_GPU_CX_REG_SIZE);
+	__raw_writel(0x3, gpu_cx_reg + A6XX_GPU_CX_MISC_SYSTEM_CACHE_CNTL_0);
+	/* Make sure the above write posts before we proceed*/
+	wmb();
+	iounmap(gpu_cx_reg);
 }
 
 static const char *fault_block[8] = {
@@ -2702,7 +2734,6 @@ static struct adreno_irq a6xx_irq = {
 	.mask = A6XX_INT_MASK,
 };
 
-#if 0
 static struct adreno_snapshot_sizes a6xx_snap_sizes = {
 	.cp_pfp = 0x33,
 	.roq = 0x400,
@@ -3125,7 +3156,6 @@ static struct adreno_coresight a6xx_coresight_cx = {
 	.count = ARRAY_SIZE(a6xx_coresight_regs_cx),
 	.groups = a6xx_coresight_groups_cx,
 };
-#endif
 
 static struct adreno_perfcount_register a6xx_perfcounters_cp[] = {
 	{ KGSL_PERFCOUNTER_NOT_USED, 0, 0, A6XX_RBBM_PERFCTR_CP_0_LO,
@@ -3878,7 +3908,11 @@ unlock:
 struct adreno_gpudev adreno_a6xx_gpudev = {
 	.reg_offsets = &a6xx_reg_offsets,
 	.start = a6xx_start,
+	.snapshot = a6xx_snapshot,
+	.snapshot_gmu = a6xx_snapshot_gmu,
 	.irq = &a6xx_irq,
+	.snapshot_data = &a6xx_snapshot_data,
+	.irq_trace = trace_kgsl_a5xx_irq_status,
 	.num_prio_levels = KGSL_PRIORITY_MAX_RB_LEVELS,
 	.platform_setup = a6xx_platform_setup,
 	.init = a6xx_init,
@@ -3914,4 +3948,5 @@ struct adreno_gpudev adreno_a6xx_gpudev = {
 	.sptprac_is_on = a6xx_sptprac_is_on,
 	.ccu_invalidate = a6xx_ccu_invalidate,
 	.perfcounter_update = a6xx_perfcounter_update,
+	.coresight = {&a6xx_coresight, &a6xx_coresight_cx},
 };

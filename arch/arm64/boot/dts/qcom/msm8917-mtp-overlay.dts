@@ -15,6 +15,7 @@
 /plugin/;
 
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/clock/msm-clocks-8952.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include "msm8917-mtp.dtsi"
 

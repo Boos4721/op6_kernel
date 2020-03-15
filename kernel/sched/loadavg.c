@@ -7,7 +7,6 @@
  */
 
 #include <linux/export.h>
-#include <linux/sched/loadavg.h>
 
 #include "sched.h"
 
@@ -94,73 +93,19 @@ long calc_load_fold_active(struct rq *this_rq, long adjust)
 	return delta;
 }
 
-/**
- * fixed_power_int - compute: x^n, in O(log n) time
- *
- * @x:         base of the power
- * @frac_bits: fractional bits of @x
- * @n:         power to raise @x to.
- *
- * By exploiting the relation between the definition of the natural power
- * function: x^n := x*x*...*x (x multiplied by itself for n times), and
- * the binary encoding of numbers used by computers: n := \Sum n_i * 2^i,
- * (where: n_i \elem {0, 1}, the binary vector representing n),
- * we find: x^n := x^(\Sum n_i * 2^i) := \Prod x^(n_i * 2^i), which is
- * of course trivially computable in O(log_2 n), the length of our binary
- * vector.
- */
-static unsigned long
-fixed_power_int(unsigned long x, unsigned int frac_bits, unsigned int n)
-{
-	unsigned long result = 1UL << frac_bits;
-
-	if (n) {
-		for (;;) {
-			if (n & 1) {
-				result *= x;
-				result += 1UL << (frac_bits - 1);
-				result >>= frac_bits;
-			}
-			n >>= 1;
-			if (!n)
-				break;
-			x *= x;
-			x += 1UL << (frac_bits - 1);
-			x >>= frac_bits;
-		}
-	}
-
-	return result;
-}
-
 /*
  * a1 = a0 * e + a * (1 - e)
- *
- * a2 = a1 * e + a * (1 - e)
- *    = (a0 * e + a * (1 - e)) * e + a * (1 - e)
- *    = a0 * e^2 + a * (1 - e) * (1 + e)
- *
- * a3 = a2 * e + a * (1 - e)
- *    = (a0 * e^2 + a * (1 - e) * (1 + e)) * e + a * (1 - e)
- *    = a0 * e^3 + a * (1 - e) * (1 + e + e^2)
- *
- *  ...
- *
- * an = a0 * e^n + a * (1 - e) * (1 + e + ... + e^n-1) [1]
- *    = a0 * e^n + a * (1 - e) * (1 - e^n)/(1 - e)
- *    = a0 * e^n + a * (1 - e^n)
- *
- * [1] application of the geometric series:
- *
- *              n         1 - x^(n+1)
- *     S_n := \Sum x^i = -------------
- *             i=0          1 - x
  */
-unsigned long
-calc_load_n(unsigned long load, unsigned long exp,
-	    unsigned long active, unsigned int n)
+static unsigned long
+calc_load(unsigned long load, unsigned long exp, unsigned long active)
 {
-	return calc_load(load, fixed_power_int(exp, FSHIFT, n), active);
+	unsigned long newload;
+
+	newload = load * exp + active * (FIXED_1 - exp);
+	if (active >= load)
+		newload += FIXED_1-1;
+
+	return newload / FIXED_1;
 }
 
 #ifdef CONFIG_NO_HZ_COMMON
@@ -223,7 +168,7 @@ static inline int calc_load_write_idx(void)
 	 * If the folding window started, make sure we start writing in the
 	 * next idle-delta.
 	 */
-	if (!time_before(jiffies, calc_load_update))
+	if (!time_before(jiffies, READ_ONCE(calc_load_update)))
 		idx++;
 
 	return idx & 1;
@@ -258,7 +203,7 @@ void calc_load_exit_idle(void)
 	/*
 	 * If we're still before the pending sample window, we're done.
 	 */
-	this_rq->calc_load_update = calc_load_update;
+	this_rq->calc_load_update = READ_ONCE(calc_load_update);
 	if (time_before(jiffies, this_rq->calc_load_update))
 		return;
 
@@ -282,6 +227,75 @@ static long calc_load_fold_idle(void)
 	return delta;
 }
 
+/**
+ * fixed_power_int - compute: x^n, in O(log n) time
+ *
+ * @x:         base of the power
+ * @frac_bits: fractional bits of @x
+ * @n:         power to raise @x to.
+ *
+ * By exploiting the relation between the definition of the natural power
+ * function: x^n := x*x*...*x (x multiplied by itself for n times), and
+ * the binary encoding of numbers used by computers: n := \Sum n_i * 2^i,
+ * (where: n_i \elem {0, 1}, the binary vector representing n),
+ * we find: x^n := x^(\Sum n_i * 2^i) := \Prod x^(n_i * 2^i), which is
+ * of course trivially computable in O(log_2 n), the length of our binary
+ * vector.
+ */
+static unsigned long
+fixed_power_int(unsigned long x, unsigned int frac_bits, unsigned int n)
+{
+	unsigned long result = 1UL << frac_bits;
+
+	if (n) {
+		for (;;) {
+			if (n & 1) {
+				result *= x;
+				result += 1UL << (frac_bits - 1);
+				result >>= frac_bits;
+			}
+			n >>= 1;
+			if (!n)
+				break;
+			x *= x;
+			x += 1UL << (frac_bits - 1);
+			x >>= frac_bits;
+		}
+	}
+
+	return result;
+}
+
+/*
+ * a1 = a0 * e + a * (1 - e)
+ *
+ * a2 = a1 * e + a * (1 - e)
+ *    = (a0 * e + a * (1 - e)) * e + a * (1 - e)
+ *    = a0 * e^2 + a * (1 - e) * (1 + e)
+ *
+ * a3 = a2 * e + a * (1 - e)
+ *    = (a0 * e^2 + a * (1 - e) * (1 + e)) * e + a * (1 - e)
+ *    = a0 * e^3 + a * (1 - e) * (1 + e + e^2)
+ *
+ *  ...
+ *
+ * an = a0 * e^n + a * (1 - e) * (1 + e + ... + e^n-1) [1]
+ *    = a0 * e^n + a * (1 - e) * (1 - e^n)/(1 - e)
+ *    = a0 * e^n + a * (1 - e^n)
+ *
+ * [1] application of the geometric series:
+ *
+ *              n         1 - x^(n+1)
+ *     S_n := \Sum x^i = -------------
+ *             i=0          1 - x
+ */
+static unsigned long
+calc_load_n(unsigned long load, unsigned long exp,
+	    unsigned long active, unsigned int n)
+{
+	return calc_load(load, fixed_power_int(exp, FSHIFT, n), active);
+}
+
 /*
  * NO_HZ can leave us missing all per-cpu ticks calling
  * calc_load_account_active(), but since an idle CPU folds its delta into
@@ -293,13 +307,15 @@ static long calc_load_fold_idle(void)
  */
 static void calc_global_nohz(void)
 {
+	unsigned long sample_window;
 	long delta, active, n;
 
-	if (!time_before(jiffies, calc_load_update + 10)) {
+	sample_window = READ_ONCE(calc_load_update);
+	if (!time_before(jiffies, sample_window + 10)) {
 		/*
 		 * Catch-up, fold however many we are behind still
 		 */
-		delta = jiffies - calc_load_update - 10;
+		delta = jiffies - sample_window - 10;
 		n = 1 + (delta / LOAD_FREQ);
 
 		active = atomic_long_read(&calc_load_tasks);
@@ -309,7 +325,7 @@ static void calc_global_nohz(void)
 		avenrun[1] = calc_load_n(avenrun[1], EXP_5, active, n);
 		avenrun[2] = calc_load_n(avenrun[2], EXP_15, active, n);
 
-		calc_load_update += n * LOAD_FREQ;
+		WRITE_ONCE(calc_load_update, sample_window + n * LOAD_FREQ);
 	}
 
 	/*
@@ -337,9 +353,11 @@ static inline void calc_global_nohz(void) { }
  */
 void calc_global_load(unsigned long ticks)
 {
+	unsigned long sample_window;
 	long active, delta;
 
-	if (time_before(jiffies, calc_load_update + 10))
+	sample_window = READ_ONCE(calc_load_update);
+	if (time_before(jiffies, sample_window + 10))
 		return;
 
 	/*
@@ -356,7 +374,7 @@ void calc_global_load(unsigned long ticks)
 	avenrun[1] = calc_load(avenrun[1], EXP_5, active);
 	avenrun[2] = calc_load(avenrun[2], EXP_15, active);
 
-	calc_load_update += LOAD_FREQ;
+	WRITE_ONCE(calc_load_update, sample_window + LOAD_FREQ);
 
 	/*
 	 * In case we idled for multiple LOAD_FREQ intervals, catch up in bulk.

@@ -221,11 +221,11 @@ void *removed_alloc(struct device *dev, size_t size, dma_addr_t *handle,
 {
 	bool no_kernel_mapping = attrs & DMA_ATTR_NO_KERNEL_MAPPING;
 	bool skip_zeroing = attrs & DMA_ATTR_SKIP_ZEROING;
-	unsigned int pageno;
+	int pageno;
 	unsigned long order;
-	void __iomem *addr = NULL;
+	void *addr = NULL;
 	struct removed_region *dma_mem = dev->removed_mem;
-	unsigned int nbits;
+	int nbits;
 	unsigned int align;
 
 	if (!gfpflags_allow_blocking(gfp))
@@ -261,7 +261,7 @@ void *removed_alloc(struct device *dev, size_t size, dma_addr_t *handle,
 			goto out;
 		}
 
-		addr = ioremap_wc(base, size);
+		addr = ioremap(base, size);
 		if (WARN_ON(!addr)) {
 			bitmap_clear(dma_mem->bitmap, pageno, nbits);
 		} else {
@@ -355,10 +355,10 @@ void removed_sync_sg_for_device(struct device *dev,
 {
 }
 
-static void __iomem *removed_remap(struct device *dev, void *cpu_addr,
-			dma_addr_t handle, size_t size, unsigned long attrs)
+void *removed_remap(struct device *dev, void *cpu_addr, dma_addr_t handle,
+			size_t size, unsigned long attrs)
 {
-	return ioremap_wc(handle, size);
+	return ioremap(handle, size);
 }
 
 void removed_unremap(struct device *dev, void *remapped_address, size_t size)

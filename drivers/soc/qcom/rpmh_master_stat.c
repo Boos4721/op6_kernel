@@ -58,8 +58,7 @@ enum profile_data {
 	POWER_UP_END,
 	POWER_DOWN_END,
 	POWER_UP_START,
-	ALT_UNIT,
-	NUM_UNIT = ALT_UNIT,
+	NUM_UNIT,
 };
 
 struct msm_rpmh_master_data {

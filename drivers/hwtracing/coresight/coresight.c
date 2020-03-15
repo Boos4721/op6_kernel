@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, 2017-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012, 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -91,23 +91,6 @@ static int coresight_source_is_unique(struct coresight_device *csdev)
 				 csdev, coresight_id_match);
 }
 
-static int coresight_reset_sink(struct device *dev, void *data)
-{
-	struct coresight_device *csdev = to_coresight_device(dev);
-
-	if ((csdev->type == CORESIGHT_DEV_TYPE_SINK ||
-			csdev->type == CORESIGHT_DEV_TYPE_LINKSINK) &&
-			csdev->activated)
-		csdev->activated = false;
-
-	return 0;
-}
-
-static void coresight_reset_all_sink(void)
-{
-	bus_for_each_dev(&coresight_bustype, NULL, NULL, coresight_reset_sink);
-}
-
 static int coresight_find_link_inport(struct coresight_device *csdev,
 				      struct coresight_device *parent)
 {
@@ -148,14 +131,12 @@ static int coresight_enable_sink(struct coresight_device *csdev, u32 mode)
 {
 	int ret;
 
-	/*
-	 * We need to make sure the "new" session is compatible with the
-	 * existing "mode" of operation.
-	 */
-	if (sink_ops(csdev)->enable) {
-		ret = sink_ops(csdev)->enable(csdev, mode);
-		if (ret)
-			return ret;
+	if (!csdev->enable) {
+		if (sink_ops(csdev)->enable) {
+			ret = sink_ops(csdev)->enable(csdev, mode);
+			if (ret)
+				return ret;
+		}
 		csdev->enable = true;
 	}
 
@@ -376,14 +357,8 @@ int coresight_enable_path(struct list_head *path, u32 mode)
 		switch (type) {
 		case CORESIGHT_DEV_TYPE_SINK:
 			ret = coresight_enable_sink(csdev, mode);
-			/*
-			 * Sink is the first component turned on. If we
-			 * failed to enable the sink, there are no components
-			 * that need disabling. Disabling the path here
-			 * would mean we could disrupt an existing session.
-			 */
 			if (ret)
-				goto out;
+				goto err;
 			break;
 		case CORESIGHT_DEV_TYPE_SOURCE:
 			/* sources are enabled from either sysFS or Perf */
@@ -804,10 +779,6 @@ static ssize_t enable_source_store(struct device *dev,
 		return ret;
 
 	if (val) {
-
-		if (csdev->enable)
-			return size;
-
 		ret = coresight_enable(csdev);
 		if (ret)
 			return ret;
@@ -1060,9 +1031,6 @@ static ssize_t reset_source_sink_store(struct bus_type *bus,
 			continue;
 		__coresight_disable(csdev);
 	}
-
-	/* Reset all activated sinks */
-	coresight_reset_all_sink();
 
 	mutex_unlock(&coresight_mutex);
 	return size;

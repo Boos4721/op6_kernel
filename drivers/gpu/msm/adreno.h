@@ -309,7 +309,6 @@ struct adreno_busy_data {
 	unsigned int bif_ram_cycles_write_ch1;
 	unsigned int bif_starved_ram;
 	unsigned int bif_starved_ram_ch1;
-	unsigned int num_ifpc;
 	unsigned int throttle_cycles[ADRENO_GPMU_THROTTLE_COUNTERS];
 };
 
@@ -325,29 +324,6 @@ struct adreno_firmware {
 	size_t size;
 	unsigned int version;
 	struct kgsl_memdesc memdesc;
-};
-
-/**
- * struct adreno_perfcounter_list_node - struct to store perfcounters
- * allocated by a process on a kgsl fd.
- * @groupid: groupid of the allocated perfcounter
- * @countable: countable assigned to the allocated perfcounter
- * @node: list node for perfcounter_list of a process
- */
-struct adreno_perfcounter_list_node {
-	unsigned int groupid;
-	unsigned int countable;
-	struct list_head node;
-};
-
-/**
- * struct adreno_device_private - Adreno private structure per fd
- * @dev_priv: the kgsl device private structure
- * @perfcounter_list: list of perfcounters used by the process
- */
-struct adreno_device_private {
-	struct kgsl_device_private dev_priv;
-	struct list_head perfcounter_list;
 };
 
 /**
@@ -429,8 +405,6 @@ enum gpu_coresight_sources {
  * @chipid: Chip ID specific to the GPU
  * @gmem_base: Base physical address of GMEM
  * @gmem_size: GMEM size
- * @cx_misc_len: Length of the CX MISC register block
- * @cx_misc_virt: Pointer where the CX MISC block is mapped
  * @gpucore: Pointer to the adreno_gpu_core structure
  * @pfp_fw: Buffer which holds the pfp ucode
  * @pfp_fw_size: Size of pfp ucode buffer
@@ -456,7 +430,7 @@ enum gpu_coresight_sources {
  * @dispatcher: Container for adreno GPU dispatcher
  * @pwron_fixup: Command buffer to run a post-power collapse shader workaround
  * @pwron_fixup_dwords: Number of dwords in the command buffer
- * @input_work: Work struct for turning on the GPU after a touch event
+ * @pwr_on_work: Work struct for turning on the GPU
  * @busy_data: Struct holding GPU VBIF busy stats
  * @ram_cycles_lo: Number of DDR clock cycles for the monitor session (Only
  * DDR channel 0 read cycles in case of GBIF)
@@ -470,7 +444,6 @@ enum gpu_coresight_sources {
  * stall cycles in case of GBIF)
  * @starved_ram_lo_ch1: Number of cycles GBIF is stalled by DDR channel 1
  * @perfctr_pwr_lo: GPU busy cycles
- * @perfctr_ifpc_lo: IFPC count
  * @halt: Atomic variable to check whether the GPU is currently halted
  * @pending_irq_refcnt: Atomic variable to keep track of running IRQ handlers
  * @ctx_d_debugfs: Context debugfs node
@@ -488,7 +461,6 @@ enum gpu_coresight_sources {
  * @lm_limit: limiting value for LM
  * @lm_threshold_count: register value for counter for lm threshold breakin
  * @lm_threshold_cross: number of current peaks exceeding threshold
- * @ifpc_count: Number of times the GPU went into IFPC
  * @speed_bin: Indicate which power level set to use
  * @csdev: Pointer to a coresight device (if applicable)
  * @gpmu_throttle_counters - counteers for number of throttled clocks
@@ -511,8 +483,6 @@ struct adreno_device {
 	unsigned long cx_dbgc_base;
 	unsigned int cx_dbgc_len;
 	void __iomem *cx_dbgc_virt;
-	unsigned int cx_misc_len;
-	void __iomem *cx_misc_virt;
 	const struct adreno_gpu_core *gpucore;
 	struct adreno_firmware fw[2];
 	size_t gpmu_cmds_size;
@@ -531,7 +501,7 @@ struct adreno_device {
 	struct adreno_dispatcher dispatcher;
 	struct kgsl_memdesc pwron_fixup;
 	unsigned int pwron_fixup_dwords;
-	struct work_struct input_work;
+	struct work_struct pwr_on_work;
 	struct adreno_busy_data busy_data;
 	unsigned int ram_cycles_lo;
 	unsigned int ram_cycles_lo_ch1_read;
@@ -540,7 +510,6 @@ struct adreno_device {
 	unsigned int starved_ram_lo;
 	unsigned int starved_ram_lo_ch1;
 	unsigned int perfctr_pwr_lo;
-	unsigned int perfctr_ifpc_lo;
 	atomic_t halt;
 	atomic_t pending_irq_refcnt;
 	struct dentry *ctx_d_debugfs;
@@ -560,11 +529,11 @@ struct adreno_device {
 	uint32_t lm_limit;
 	uint32_t lm_threshold_count;
 	uint32_t lm_threshold_cross;
-	uint32_t ifpc_count;
 
 	unsigned int speed_bin;
 	unsigned int quirks;
 
+	struct coresight_device *csdev[GPU_CORESIGHT_MAX];
 	uint32_t gpmu_throttle_counters[ADRENO_GPMU_THROTTLE_COUNTERS];
 	struct work_struct irq_storm_work;
 
@@ -934,11 +903,17 @@ struct adreno_gpudev {
 
 	struct adreno_perfcounters *perfcounters;
 	const struct adreno_invalid_countables *invalid_countables;
+	struct adreno_snapshot_data *snapshot_data;
+
+	struct adreno_coresight *coresight[GPU_CORESIGHT_MAX];
 
 	struct adreno_irq *irq;
 	int num_prio_levels;
 	unsigned int vbif_xin_halt_ctrl0_mask;
 	/* GPU specific function hooks */
+	void (*irq_trace)(struct adreno_device *, unsigned int status);
+	void (*snapshot)(struct adreno_device *, struct kgsl_snapshot *);
+	void (*snapshot_gmu)(struct adreno_device *, struct kgsl_snapshot *);
 	void (*platform_setup)(struct adreno_device *);
 	void (*init)(struct adreno_device *);
 	void (*remove)(struct adreno_device *);
@@ -1082,10 +1057,12 @@ extern unsigned int *adreno_ft_regs;
 extern unsigned int adreno_ft_regs_num;
 extern unsigned int *adreno_ft_regs_val;
 
+extern struct adreno_gpudev adreno_a3xx_gpudev;
+extern struct adreno_gpudev adreno_a4xx_gpudev;
+extern struct adreno_gpudev adreno_a5xx_gpudev;
 extern struct adreno_gpudev adreno_a6xx_gpudev;
 
 extern int adreno_wake_nice;
-extern unsigned int adreno_wake_timeout;
 
 int adreno_start(struct kgsl_device *device, int priority);
 int adreno_soft_reset(struct kgsl_device *device);
@@ -1113,9 +1090,12 @@ void adreno_shadermem_regread(struct kgsl_device *device,
 						unsigned int offsetwords,
 						unsigned int *value);
 
-static inline void adreno_snapshot(struct kgsl_device *device,
+void adreno_snapshot(struct kgsl_device *device,
 		struct kgsl_snapshot *snapshot,
-		struct kgsl_context *context) {}
+		struct kgsl_context *context);
+
+void adreno_snapshot_gmu(struct kgsl_device *device,
+		struct kgsl_snapshot *snapshot);
 
 int adreno_reset(struct kgsl_device *device, int fault);
 
@@ -1161,24 +1141,17 @@ void adreno_cx_dbgc_regread(struct kgsl_device *adreno_device,
 		unsigned int offsetwords, unsigned int *value);
 void adreno_cx_dbgc_regwrite(struct kgsl_device *device,
 		unsigned int offsetwords, unsigned int value);
-void adreno_cx_misc_regread(struct adreno_device *adreno_dev,
-		unsigned int offsetwords, unsigned int *value);
-void adreno_cx_misc_regwrite(struct adreno_device *adreno_dev,
-		unsigned int offsetwords, unsigned int value);
-void adreno_cx_misc_regrmw(struct adreno_device *adreno_dev,
-		unsigned int offsetwords,
-		unsigned int mask, unsigned int bits);
-
 
 #define ADRENO_TARGET(_name, _id) \
 static inline int adreno_is_##_name(struct adreno_device *adreno_dev) \
 { \
-	return 0; \
+	return (ADRENO_GPUREV(adreno_dev) == (_id)); \
 }
 
 static inline int adreno_is_a3xx(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return ((ADRENO_GPUREV(adreno_dev) >= 300) &&
+		(ADRENO_GPUREV(adreno_dev) < 400));
 }
 
 ADRENO_TARGET(a304, ADRENO_REV_A304)
@@ -1193,24 +1166,28 @@ ADRENO_TARGET(a330, ADRENO_REV_A330)
 
 static inline int adreno_is_a330v2(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return ((ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A330) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) > 0));
 }
 
 static inline int adreno_is_a330v21(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return ((ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A330) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) > 0xF));
 }
 
 static inline int adreno_is_a4xx(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return ADRENO_GPUREV(adreno_dev) >= 400 &&
+		ADRENO_GPUREV(adreno_dev) < 500;
 }
 
 ADRENO_TARGET(a405, ADRENO_REV_A405);
 
 static inline int adreno_is_a405v2(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return (ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A405) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 0x10);
 }
 
 ADRENO_TARGET(a418, ADRENO_REV_A418)
@@ -1219,12 +1196,14 @@ ADRENO_TARGET(a430, ADRENO_REV_A430)
 
 static inline int adreno_is_a430v2(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return ((ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A430) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 1));
 }
 
 static inline int adreno_is_a5xx(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return ADRENO_GPUREV(adreno_dev) >= 500 &&
+			ADRENO_GPUREV(adreno_dev) < 600;
 }
 
 ADRENO_TARGET(a504, ADRENO_REV_A504)
@@ -1238,55 +1217,60 @@ ADRENO_TARGET(a540, ADRENO_REV_A540)
 
 static inline int adreno_is_a530v1(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return (ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A530) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 0);
 }
 
 static inline int adreno_is_a530v2(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return (ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A530) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 1);
 }
 
 static inline int adreno_is_a530v3(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return (ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A530) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 2);
 }
 
 static inline int adreno_is_a504_to_a506(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return ADRENO_GPUREV(adreno_dev) >= 504 &&
+			ADRENO_GPUREV(adreno_dev) <= 506;
 }
 
 static inline int adreno_is_a540v1(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return (ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A540) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 0);
 }
 
 static inline int adreno_is_a540v2(struct adreno_device *adreno_dev)
 {
-	return 0;
+	return (ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A540) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 1);
 }
 
 static inline int adreno_is_a6xx(struct adreno_device *adreno_dev)
 {
-	return 1;
-}
-
-static inline int adreno_is_a630(struct adreno_device *adreno_dev)
-{
-	return 1;
+	return ADRENO_GPUREV(adreno_dev) >= 600 &&
+			ADRENO_GPUREV(adreno_dev) < 700;
 }
 
 ADRENO_TARGET(a615, ADRENO_REV_A615)
 ADRENO_TARGET(a616, ADRENO_REV_A616)
+ADRENO_TARGET(a630, ADRENO_REV_A630)
 
 static inline int adreno_is_a630v1(struct adreno_device *adreno_dev)
 {
-	return (ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 0);
+	return (ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A630) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 0);
 }
 
 static inline int adreno_is_a630v2(struct adreno_device *adreno_dev)
 {
-	return (ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 1);
+	return (ADRENO_GPUREV(adreno_dev) == ADRENO_REV_A630) &&
+		(ADRENO_CHIPID_PATCH(adreno_dev->chipid) == 1);
 }
 
 /*

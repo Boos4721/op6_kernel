@@ -266,7 +266,6 @@ int dsi_deregister_clk_handle(void *client);
  *
  * return: error code in case of failure or 0 for success.
  */
-
 int dsi_display_link_clk_force_update(void *handle);
 
 /**
@@ -278,7 +277,7 @@ int dsi_display_link_clk_force_update(void *handle);
  * return: error code in case of failure or 0 for success.
  */
 int dsi_display_clk_ctrl(void *handle, enum dsi_clk_type clk_type,
-			 enum dsi_clk_state clk_state);
+		enum dsi_clk_state clk_state);
 
 /**
  * dsi_clk_set_link_frequencies() - set frequencies for link clks
@@ -318,20 +317,6 @@ int dsi_clk_set_byte_clk_rate(void *client, u64 byte_clk, u32 index);
  */
 int dsi_clk_update_parent(struct dsi_clk_link_set *parent,
 			  struct dsi_clk_link_set *child);
-
-/**
- * dsi_clk_prepare_enable() - prepare and enable dsi src clocks
- * @clk:       list of src clocks.
- *
- * @return:	Zero on success and err no on failure
- */
-int dsi_clk_prepare_enable(struct dsi_clk_link_set *clk);
-
-/**
- * dsi_clk_disable_unprepare() - disable and unprepare dsi src clocks
- * @clk:       list of src clocks.
- */
-void dsi_clk_disable_unprepare(struct dsi_clk_link_set *clk);
 
 /**
  * dsi_clk_req_state() - request to change dsi clock state

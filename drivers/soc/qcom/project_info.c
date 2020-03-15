@@ -20,7 +20,6 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/machine.h>
-#include <linux/pstore.h>
 
 static struct component_info component_info_desc[COMPONENT_MAX];
 static struct kobject *project_info_kobj;
@@ -85,7 +84,6 @@ void save_dump_reason_to_smem(char *info, char *function_name)
     }
     pr_err("\r%s: dump_reason : %s strl=%d function caused panic :%s strl1=%d \n", __func__,
                            dp_info->dump_reason, strl, function_name, strl1);
-    save_dump_reason_to_device_info(dp_info->dump_reason);
     flag++;
 }
 
@@ -267,7 +265,7 @@ static struct attribute *component_info_sysfs_entries[] = {
     &dev_attr_f_camera.attr,
     &dev_attr_r_camera.attr,
     &dev_attr_second_r_camera.attr,
-    &dev_attr_ois.attr,
+	&dev_attr_ois.attr,
     &dev_attr_tp.attr,
     &dev_attr_lcd.attr,
     &dev_attr_wcn.attr,
@@ -316,10 +314,10 @@ static ssize_t component_info_get(struct device *dev,
         return snprintf(buf, BUF_SIZE, "VER:\t%s\nMANU:\t%s\n",
         get_component_version(SECOND_R_CAMERA),
         get_component_manufacture(SECOND_R_CAMERA));
-    if (attr == &dev_attr_ois)
-        return snprintf(buf, BUF_SIZE, "VER:\t%s\nMANU:\t%s\n",
-        get_component_version(OIS),
-        get_component_manufacture(OIS));
+	if (attr == &dev_attr_ois)
+		return snprintf(buf, BUF_SIZE, "VER:\t%s\nMANU:\t%s\n",
+		get_component_version(OIS),
+		get_component_manufacture(OIS));
     if (attr == &dev_attr_tp)
         return snprintf(buf, BUF_SIZE, "VER:\t%s\nMANU:\t%s\n",
         get_component_version(TP),
@@ -474,7 +472,7 @@ void get_ddr_manufacture_name(void)
         for (i = 0; i < length; i++) {
             if (ddr_manufacture_list[i].id ==
                 project_info_desc->ddr_manufacture_info) {
-                snprintf(ddr_manufacture, 20, "%s",
+                snprintf(ddr_manufacture, BUF_SIZE, "%s",
                     ddr_manufacture_list[i].name);
                 break;
             }
@@ -491,7 +489,7 @@ void get_cpu_type(void)
         for (i = 0; i < length; i++) {
             if (cpu_list_msm[i].id ==
                 project_info_desc->platform_id) {
-                snprintf(cpu_type, 20,
+                snprintf(cpu_type, BUF_SIZE,
                     "%s", cpu_list_msm[i].name);
                 break;
             }
@@ -634,7 +632,7 @@ int __init init_project_info(void)
         break;
     case 35:
         snprintf(mainboard_version, sizeof(mainboard_version), "%s %s",
-        project_info_desc->project_name, "2ND");
+        project_info_desc->project_name, "DVT2nd");
         break;
     case 41:
         snprintf(mainboard_version, sizeof(mainboard_version), "%s %s",
@@ -656,7 +654,7 @@ int __init init_project_info(void)
         snprintf(mainboard_version, sizeof(mainboard_version), "%s %s",
         project_info_desc->project_name, "MPSpec");
         break;
-    case 55:
+	case 55:
         snprintf(mainboard_version, sizeof(mainboard_version), "%s %s",
         project_info_desc->project_name, "DVTUSB30");
         break;

@@ -62,6 +62,26 @@
 #include <linux/bsearch.h>
 #include <linux/dynamic_debug.h>
 #include <uapi/linux/module.h>
+
+#ifndef CONFIG_MODULES
+SYSCALL_DEFINE2(delete_module, const char __user *, name_user,
+		unsigned int, flags)
+{
+	return 0;
+}
+
+SYSCALL_DEFINE3(init_module, void __user *, umod,
+		unsigned long, len, const char __user *, uargs)
+{
+	return 0;
+}
+
+SYSCALL_DEFINE3(finit_module, int, fd, const char __user *, uargs, int, flags)
+{
+	return 0;
+}
+#else
+
 #include "module-internal.h"
 
 #define CREATE_TRACE_POINTS
@@ -995,8 +1015,6 @@ SYSCALL_DEFINE2(delete_module, const char __user *, name_user,
 	strlcpy(last_unloaded_module, mod->name, sizeof(last_unloaded_module));
 
 	free_module(mod);
-	/* someone could wait for the module in add_unformed_module() */
-	wake_up_all(&module_wq);
 	return 0;
 out:
 	mutex_unlock(&module_mutex);
@@ -1281,7 +1299,7 @@ static int check_version(Elf_Shdr *sechdrs,
 	struct modversion_info *versions;
 
 	/* Force wlan to load */
-	if (!strncmp("wlan", mod->name, 4))
+	if (!memcmp("wlan", mod->name, sizeof("wlan")))
 		return 1;
 
 	/* Exporting module didn't supply crcs?  OK, we're already tainted. */
@@ -2162,11 +2180,6 @@ static void free_module(struct module *mod)
 
 	/* Finally, free the core (containing the module structure) */
 	disable_ro_nx(&mod->core_layout);
-#ifdef CONFIG_DEBUG_MODULE_LOAD_INFO
-	pr_info("Unloaded %s: module core layout address range: 0x%lx-0x%lx\n",
-		mod->name, (long)mod->core_layout.base,
-		(long)(mod->core_layout.base + mod->core_layout.size - 1));
-#endif
 	module_memfree(mod->core_layout.base);
 
 #ifdef CONFIG_MPU
@@ -2988,9 +3001,8 @@ static int check_modinfo(struct module *mod, struct load_info *info, int flags)
 	const char *modmagic = get_modinfo(info, "vermagic");
 	int err;
 
-
-        if(!strncmp("wlan", mod->name, 4))
-                goto end;
+	if (!memcmp("wlan", mod->name, sizeof("wlan")))
+		goto end;
 
 	if (flags & MODULE_INIT_IGNORE_VERMAGIC)
 		modmagic = NULL;
@@ -3484,14 +3496,6 @@ static noinline int do_init_module(struct module *mod)
 	mod_tree_remove_init(mod);
 	disable_ro_nx(&mod->init_layout);
 	module_arch_freeing_init(mod);
-#ifdef CONFIG_DEBUG_MODULE_LOAD_INFO
-	pr_info("Loaded %s: module init layout addresses range: 0x%lx-0x%lx\n",
-		mod->name, (long)mod->init_layout.base,
-		(long)(mod->init_layout.base + mod->init_layout.size - 1));
-	pr_info("%s: core layout addresses range: 0x%lx-0x%lx\n", mod->name,
-		(long)mod->core_layout.base,
-		(long)(mod->core_layout.base + mod->core_layout.size - 1));
-#endif
 	mod->init_layout.base = NULL;
 	mod->init_layout.size = 0;
 	mod->init_layout.ro_size = 0;
@@ -4363,3 +4367,5 @@ void module_layout(struct module *mod,
 }
 EXPORT_SYMBOL(module_layout);
 #endif
+
+#endif // CONFIG_MODULES

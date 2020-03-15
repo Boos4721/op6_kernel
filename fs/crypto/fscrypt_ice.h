@@ -21,7 +21,7 @@ static inline bool fscrypt_should_be_processed_by_ice(const struct inode *inode)
 {
 	if (!inode->i_sb->s_cop)
 		return 0;
-	if (!IS_ENCRYPTED((struct inode *)inode))
+	if (!inode->i_sb->s_cop->is_encrypted((struct inode *)inode))
 	return 0;
 
 	return fscrypt_using_hardware_encryption(inode);
@@ -40,10 +40,17 @@ char *fscrypt_get_ice_encryption_salt(const struct inode *inode);
 bool fscrypt_is_ice_encryption_info_equal(const struct inode *inode1,
 					const struct inode *inode2);
 
-size_t fscrypt_get_ice_encryption_key_size(const struct inode *inode);
+static inline size_t fscrypt_get_ice_encryption_key_size(
+					const struct inode *inode)
+{
+	return FS_AES_256_XTS_KEY_SIZE / 2;
+}
 
-size_t fscrypt_get_ice_encryption_salt_size(const struct inode *inode);
-
+static inline size_t fscrypt_get_ice_encryption_salt_size(
+					const struct inode *inode)
+{
+	return FS_AES_256_XTS_KEY_SIZE / 2;
+}
 #else
 static inline bool fscrypt_should_be_processed_by_ice(const struct inode *inode)
 {

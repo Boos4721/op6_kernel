@@ -23,7 +23,6 @@ enum bg_tz_commands {
 	BGPIL_IMAGE_LOAD,
 	BGPIL_AUTH_MDT,
 	BGPIL_DLOAD_CONT,
-	BGPIL_GET_BG_VERSION,
 };
 
 /* tzapp bg request.*/

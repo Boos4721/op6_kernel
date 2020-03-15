@@ -16,20 +16,21 @@
 #include <linux/workqueue.h>
 
 /* Iface handling */
-#define IDEBUG_MASK BIT(0)
+#define IDEBUG_MASK (1<<0)
 /* Iptable Matching. Per packet. */
-#define MDEBUG_MASK BIT(1)
+#define MDEBUG_MASK (1<<1)
 /* Red-black tree handling. Per packet. */
-#define RDEBUG_MASK BIT(2)
+#define RDEBUG_MASK (1<<2)
 /* procfs ctrl/stats handling */
-#define CDEBUG_MASK BIT(3)
+#define CDEBUG_MASK (1<<3)
 /* dev and resource tracking */
-#define DDEBUG_MASK BIT(4)
+#define DDEBUG_MASK (1<<4)
 
 /* E.g (IDEBUG_MASK | CDEBUG_MASK | DDEBUG_MASK) */
 #define DEFAULT_DEBUG_MASK 0
 
-/* (Un)Define these *DEBUG to compile out/in the pr_debug calls.
+/*
+ * (Un)Define these *DEBUG to compile out/in the pr_debug calls.
  * All undef: text size ~ 0x3030; all def: ~ 0x4404.
  */
 #define IDEBUG
@@ -71,7 +72,8 @@
 extern uint qtaguid_debug_mask;
 
 /*---------------------------------------------------------------------------*/
-/* Tags:
+/*
+ * Tags:
  *
  * They represent what the data usage counters will be tracked against.
  * By default a tag is just based on the UID.
@@ -98,7 +100,7 @@ extern uint qtaguid_debug_mask;
  * It might become a struct if needed.
  * Nothing should be using it as an int.
  */
-typedef u64 tag_t;  /* Only used via accessors */
+typedef uint64_t tag_t;  /* Only used via accessors */
 
 #define TAG_UID_MASK 0xFFFFFFFFULL
 #define TAG_ACCT_MASK (~0xFFFFFFFFULL)
@@ -112,22 +114,18 @@ static inline tag_t combine_atag_with_uid(tag_t acct_tag, uid_t uid)
 {
 	return acct_tag | uid;
 }
-
 static inline tag_t make_tag_from_uid(uid_t uid)
 {
 	return uid;
 }
-
 static inline uid_t get_uid_from_tag(tag_t tag)
 {
 	return tag & TAG_UID_MASK;
 }
-
 static inline tag_t get_utag_from_tag(tag_t tag)
 {
 	return tag & TAG_UID_MASK;
 }
-
 static inline tag_t get_atag_from_tag(tag_t tag)
 {
 	return tag & TAG_ACCT_MASK;
@@ -137,21 +135,22 @@ static inline bool valid_atag(tag_t tag)
 {
 	return !(tag & TAG_UID_MASK);
 }
-
 static inline tag_t make_atag_from_value(uint32_t value)
 {
 	return (uint64_t)value << 32;
 }
-
 /*---------------------------------------------------------------------------*/
-/* Maximum number of socket tags that a UID is allowed to have active.
+
+/*
+ * Maximum number of socket tags that a UID is allowed to have active.
  * Multiple processes belonging to the same UID contribute towards this limit.
  * Special UIDs that can impersonate a UID also contribute (e.g. download
  * manager, ...)
  */
 #define DEFAULT_MAX_SOCK_TAGS 1024
 
-/* For now we only track 2 sets of counters.
+/*
+ * For now we only track 2 sets of counters.
  * The default set is 0.
  * Userspace can activate another set for a given uid being tracked.
  */
@@ -172,14 +171,12 @@ enum ifs_proto {
 };
 
 struct byte_packet_counters {
-	u64 bytes;
-	u64 packets;
+	uint64_t bytes;
+	uint64_t packets;
 };
 
 struct data_counters {
-	struct byte_packet_counters bpc[IFS_MAX_COUNTER_SETS]
-				       [IFS_MAX_DIRECTIONS]
-				       [IFS_MAX_PROTOS];
+	struct byte_packet_counters bpc[IFS_MAX_COUNTER_SETS][IFS_MAX_DIRECTIONS][IFS_MAX_PROTOS];
 };
 
 static inline uint64_t dc_sum_bytes(struct data_counters *counters,
@@ -200,6 +197,7 @@ static inline uint64_t dc_sum_packets(struct data_counters *counters,
 		+ counters->bpc[set][direction][IFS_PROTO_OTHER].packets;
 }
 
+
 /* Generic X based nodes used as a base for rb_tree ops */
 struct tag_node {
 	struct rb_node node;
@@ -209,7 +207,8 @@ struct tag_node {
 struct tag_stat {
 	struct tag_node tn;
 	struct data_counters counters;
-	/* If this tag is acct_tag based, we need to count against the
+	/*
+	 * If this tag is acct_tag based, we need to count against the
 	 * matching parent uid_tag.
 	 */
 	struct data_counters *parent_counters;
@@ -224,7 +223,8 @@ struct iface_stat {
 
 	struct byte_packet_counters totals_via_dev[IFS_MAX_DIRECTIONS];
 	struct data_counters totals_via_skb;
-	/* We keep the last_known, because some devices reset their counters
+	/*
+	 * We keep the last_known, because some devices reset their counters
 	 * just before NETDEV_UP, while some will reset just before
 	 * NETDEV_REGISTER (which is more normal).
 	 * So now, if the device didn't do a NETDEV_UNREGISTER and we see
@@ -238,7 +238,7 @@ struct iface_stat {
 	struct proc_dir_entry *proc_ptr;
 
 	struct rb_root tag_stat_tree;
-	spinlock_t tag_stat_list_lock; /* generic spin-lock for start list*/
+	spinlock_t tag_stat_list_lock;
 };
 
 /* This is needed to create proc_dir_entries from atomic context. */
@@ -247,7 +247,8 @@ struct iface_stat_work {
 	struct iface_stat *iface_entry;
 };
 
-/* Track tag that this socket is transferring data for, and not necessarily
+/*
+ * Track tag that this socket is transferring data for, and not necessarily
  * the uid that owns the socket.
  * This is the tag against which tag_stat.counters will be billed.
  * These structs need to be looked up by sock and pid.
@@ -273,7 +274,8 @@ struct qtaguid_event_counts {
 	atomic64_t match_calls;   /* Number of times iptables called mt */
 	/* Number of times iptables called mt from pre or post routing hooks */
 	atomic64_t match_calls_prepost;
-	/* match_found_sk_*: numbers related to the netfilter matching
+	/*
+	 * match_found_sk_*: numbers related to the netfilter matching
 	 * function finding a sock for the sk_buff.
 	 * Total skbs processed is sum(match_found*).
 	 */
@@ -281,11 +283,13 @@ struct qtaguid_event_counts {
 	/* The connection tracker had or didn't have the sk. */
 	atomic64_t match_found_sk_in_ct;
 	atomic64_t match_found_no_sk_in_ct;
-	/* No sk could be found. No apparent owner. Could happen with
+	/*
+	 * No sk could be found. No apparent owner. Could happen with
 	 * unsolicited traffic.
 	 */
 	atomic64_t match_no_sk;
-	/* The file ptr in the sk_socket wasn't there and we couldn't get GID.
+	/*
+	 * The file ptr in the sk_socket wasn't there and we couldn't get GID.
 	 * This might happen for traffic while the socket is being closed.
 	 */
 	atomic64_t match_no_sk_gid;
@@ -298,7 +302,8 @@ struct tag_counter_set {
 };
 
 /*----------------------------------------------*/
-/* The qtu uid data is used to track resources that are created directly or
+/*
+ * The qtu uid data is used to track resources that are created directly or
  * indirectly by processes (uid tracked).
  * It is shared by the processes with the same uid.
  * Some of the resource will be counted to prevent further rogue allocations,
@@ -308,7 +313,8 @@ struct uid_tag_data {
 	struct rb_node node;
 	uid_t uid;
 
-	/* For the uid, how many accounting tags have been set.
+	/*
+	 * For the uid, how many accounting tags have been set.
 	 */
 	int num_active_tags;
 	/* Track the number of proc_qtu_data that reference it */
@@ -320,7 +326,8 @@ struct uid_tag_data {
 struct tag_ref {
 	struct tag_node tn;
 
-	/* This tracks the number of active sockets that have a tag on them
+	/*
+	 * This tracks the number of active sockets that have a tag on them
 	 * which matches this tag_ref.tn.tag.
 	 * A tag ref can live on after the sockets are untagged.
 	 * A tag ref can only be removed during a tag delete command.

@@ -269,11 +269,6 @@ extern unsigned int kobjsize(const void *objp);
 /* This mask is used to clear all the VMA flags used by mlock */
 #define VM_LOCKED_CLEAR_MASK	(~(VM_LOCKED | VM_LOCKONFAULT))
 
-#ifdef CONFIG_ARCH_MSM8953_SOC_SETTINGS
-#define MSM8953_TLMM_START_ADDR	0x01000000
-#define MSM8953_TLMM_END_ADDR	(0x01300000 - 1)
-#endif
-
 /*
  * mapping from the currently active vm_flags protection bits (the
  * low four bits) to a page protection mask..
@@ -365,7 +360,7 @@ struct fault_env {
 /*
  * These are the virtual MM functions - opening of an area, closing and
  * unmapping it (needed to keep files on disk up-to-date etc), pointer
- * to the functions called when a no-page or a wp-page exception occurs.
+ * to the functions called when a no-page or a wp-page exception occurs. 
  */
 struct vm_operations_struct {
 	void (*open)(struct vm_area_struct * area);
@@ -522,6 +517,11 @@ static inline int is_vmalloc_or_module_addr(const void *x)
 #endif
 
 extern void kvfree(const void *addr);
+
+static inline atomic_t *compound_mapcount_ptr(struct page *page)
+{
+	return &page[1].compound_mapcount;
+}
 
 static inline int compound_mapcount(struct page *page)
 {
@@ -1904,8 +1904,6 @@ static inline spinlock_t *pmd_lock(struct mm_struct *mm, pmd_t *pmd)
 	return ptl;
 }
 
-extern void __init pagecache_init(void);
-
 extern void free_area_init(unsigned long * zones_size);
 extern void free_area_init_node(int nid, unsigned long * zones_size,
 		unsigned long zone_start_pfn, unsigned long *zholes_size);
@@ -2258,8 +2256,8 @@ int write_one_page(struct page *page, int wait);
 void task_dirty_inc(struct task_struct *tsk);
 
 /* readahead.c */
-#define VM_MAX_READAHEAD	128	/* kbytes */
-#define VM_MIN_READAHEAD	64	/* kbytes (includes current page) */
+#define VM_MAX_READAHEAD	512	/* kbytes */
+#define VM_MIN_READAHEAD	16	/* kbytes (includes current page) */
 
 int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
 			pgoff_t offset, unsigned long nr_to_read);

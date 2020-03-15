@@ -158,7 +158,6 @@ int devfreq_update_status(struct devfreq *devfreq, unsigned long freq)
 	int lev, prev_lev, ret = 0;
 	unsigned long cur_time;
 
-	lockdep_assert_held(&devfreq->lock);
 	cur_time = jiffies;
 
 	/* Immediately exit if previous_freq is not initialized yet. */
@@ -265,10 +264,15 @@ int update_devfreq(struct devfreq *devfreq)
 	if (!devfreq->governor)
 		return -EINVAL;
 
-	/* Reevaluate the proper frequency */
-	err = devfreq->governor->get_target_freq(devfreq, &freq);
-	if (err)
-		return err;
+	if (devfreq->max_boost) {
+		/* Use the max freq for max boosts */
+		freq = ULONG_MAX;
+	} else {
+		/* Reevaluate the proper frequency */
+		err = devfreq->governor->get_target_freq(devfreq, &freq, &flags);
+		if (err)
+			return err;
+	}
 
 	/*
 	 * Adjust the frequency with user freq and QoS.
@@ -467,7 +471,6 @@ void devfreq_interval_update(struct devfreq *devfreq, unsigned int *delay)
 		mutex_unlock(&devfreq->lock);
 		cancel_delayed_work_sync(&devfreq->work);
 		mutex_lock(&devfreq->lock);
-/*Modified by liwei for avoiding BUG_ON issue*/
 		if (!devfreq->stop_polling
 			&& !delayed_work_pending(&devfreq->work))
 			queue_delayed_work(devfreq_wq, &devfreq->work,
@@ -507,6 +510,11 @@ static int devfreq_notifier_call(struct notifier_block *nb, unsigned long type,
 static void _remove_devfreq(struct devfreq *devfreq)
 {
 	mutex_lock(&devfreq_list_lock);
+	if (IS_ERR(find_device_devfreq(devfreq->dev.parent))) {
+		mutex_unlock(&devfreq_list_lock);
+		dev_warn(&devfreq->dev, "releasing devfreq which doesn't exist\n");
+		return;
+	}
 	list_del(&devfreq->node);
 	mutex_unlock(&devfreq_list_lock);
 
@@ -580,7 +588,6 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	devfreq->dev.parent = dev;
 	devfreq->dev.class = devfreq_class;
 	devfreq->dev.release = devfreq_dev_release;
-	INIT_LIST_HEAD(&devfreq->node);
 	devfreq->profile = profile;
 	strncpy(devfreq->governor_name, governor_name, DEVFREQ_NAME_LEN);
 	devfreq->previous_freq = profile->initial_freq;
@@ -1023,7 +1030,7 @@ static ssize_t available_governors_show(struct device *d,
 	 * The devfreq with immutable governor (e.g., passive) shows
 	 * only own governor.
 	 */
-	if (df->governor && df->governor->immutable) {
+	if (df->governor->immutable) {
 		count = scnprintf(&buf[count], DEVFREQ_NAME_LEN,
 				   "%s ", df->governor_name);
 	/*
@@ -1111,6 +1118,10 @@ static ssize_t min_freq_store(struct device *dev, struct device_attribute *attr,
 	unsigned long value;
 	int ret;
 	unsigned long max;
+
+	/* Minfreq is managed by devfreq_boost */
+	if (df->is_boost_device)
+		return count;
 
 	ret = sscanf(buf, "%lu", &value);
 	if (ret != 1)
@@ -1221,16 +1232,11 @@ static ssize_t trans_stat_show(struct device *dev,
 	int i, j;
 	unsigned int max_state = devfreq->profile->max_state;
 
+	if (!devfreq->stop_polling &&
+			devfreq_update_status(devfreq, devfreq->previous_freq))
+		return 0;
 	if (max_state == 0)
 		return sprintf(buf, "Not Supported.\n");
-
-	mutex_lock(&devfreq->lock);
-	if (!devfreq->stop_polling &&
-			devfreq_update_status(devfreq, devfreq->previous_freq)) {
-		mutex_unlock(&devfreq->lock);
-		return 0;
-	}
-	mutex_unlock(&devfreq->lock);
 
 	len = sprintf(buf, "     From  :   To\n");
 	len += sprintf(buf + len, "           :");

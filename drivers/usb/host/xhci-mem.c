@@ -28,7 +28,6 @@
 
 #include "xhci.h"
 #include "xhci-trace.h"
-/* david.liu@bsp, 20171122 Disable hw-lpm for some u-disk */
 #include <linux/moduleparam.h>
 
 static bool usb2_lpm_disable = 1;
@@ -1538,15 +1537,14 @@ int xhci_endpoint_init(struct xhci_hcd *xhci,
 	/* Allow 3 retries for everything but isoc, set CErr = 3 */
 	if (!usb_endpoint_xfer_isoc(&ep->desc))
 		err_count = 3;
-	/* HS bulk max packet should be 512, FS bulk supports 8, 16, 32 or 64 */
-	if (usb_endpoint_xfer_bulk(&ep->desc)) {
-		if (udev->speed == USB_SPEED_HIGH)
-			max_packet = 512;
-		if (udev->speed == USB_SPEED_FULL) {
-			max_packet = rounddown_pow_of_two(max_packet);
-			max_packet = clamp_val(max_packet, 8, 64);
-		}
-	}
+	/* Some devices get this wrong */
+	if (usb_endpoint_xfer_bulk(&ep->desc) && udev->speed == USB_SPEED_HIGH)
+		max_packet = 512;
+
+	if (usb_endpoint_xfer_bulk(&ep->desc) && udev->speed == USB_SPEED_FULL
+				&& max_packet < 8)
+		max_packet = 8;
+
 	/* xHCI 1.0 and 1.1 indicates that ctrl ep avg TRB Length should be 8 */
 	if (usb_endpoint_xfer_control(&ep->desc) && xhci->hci_version >= 0x100)
 		avg_trb_len = 8;
@@ -2333,7 +2331,6 @@ static void xhci_add_in_port(struct xhci_hcd *xhci, unsigned int num_ports,
 		xhci_dbg_trace(xhci, trace_xhci_dbg_init,
 				"xHCI 1.0: support USB2 software lpm");
 		xhci->sw_lpm_support = 1;
-/* david.liu@bsp, 20171122 Disable hw-lpm for some u-disk */
 		if (!usb2_lpm_disable && (temp & XHCI_HLC)) {
 			xhci_dbg_trace(xhci, trace_xhci_dbg_init,
 					"xHCI 1.0: support USB2 hardware lpm");

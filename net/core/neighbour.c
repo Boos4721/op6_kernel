@@ -18,7 +18,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/slab.h>
-#include <linux/kmemleak.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -327,14 +326,12 @@ static struct neigh_hash_table *neigh_hash_alloc(unsigned int shift)
 	ret = kmalloc(sizeof(*ret), GFP_ATOMIC);
 	if (!ret)
 		return NULL;
-	if (size <= PAGE_SIZE) {
+	if (size <= PAGE_SIZE)
 		buckets = kzalloc(size, GFP_ATOMIC);
-	} else {
+	else
 		buckets = (struct neighbour __rcu **)
 			  __get_free_pages(GFP_ATOMIC | __GFP_ZERO,
 					   get_order(size));
-		kmemleak_alloc(buckets, size, 1, GFP_ATOMIC);
-	}
 	if (!buckets) {
 		kfree(ret);
 		return NULL;
@@ -354,12 +351,10 @@ static void neigh_hash_free_rcu(struct rcu_head *head)
 	size_t size = (1 << nht->hash_shift) * sizeof(struct neighbour *);
 	struct neighbour __rcu **buckets = nht->hash_buckets;
 
-	if (size <= PAGE_SIZE) {
+	if (size <= PAGE_SIZE)
 		kfree(buckets);
-	} else {
-		kmemleak_free(buckets);
+	else
 		free_pages((unsigned long)buckets, get_order(size));
-	}
 	kfree(nht);
 }
 
@@ -895,9 +890,12 @@ static void neigh_timer_handler(unsigned long arg)
 	now = jiffies;
 	next = now + HZ;
 
-	if (!(state & NUD_IN_TIMER))
-		goto out;
-
+	if (!(state & NUD_IN_TIMER)) {
+		if (neigh_probe_enable && (state & NUD_STALE))
+			neigh_dbg(2, "neigh %pK is still alive\n", neigh);
+		else
+			goto out;
+	}
 	if (state & NUD_REACHABLE) {
 		if (time_before_eq(now,
 				   neigh->confirmed + neigh->parms->reachable_time)) {
@@ -1067,7 +1065,7 @@ static void neigh_update_hhs(struct neighbour *neigh)
 
 	if (update) {
 		hh = &neigh->hh;
-		if (READ_ONCE(hh->hh_len)) {
+		if (hh->hh_len) {
 			write_seqlock_bh(&hh->hh_lock);
 			update(hh, neigh->dev, neigh->ha);
 			write_sequnlock_bh(&hh->hh_lock);
@@ -1193,7 +1191,10 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 		neigh_del_timer(neigh);
 		if (new & NUD_PROBE)
 			atomic_set(&neigh->probes, 0);
-		if (new & NUD_IN_TIMER)
+		if (new & NUD_IN_TIMER || (
+			neigh_probe_enable &&
+			(neigh->tbl->family == AF_INET6) &&
+			(new & NUD_STALE)))
 			neigh_add_timer(neigh, (jiffies +
 						((new & NUD_REACHABLE) ?
 						 neigh->parms->reachable_time :
@@ -1294,10 +1295,9 @@ struct neighbour *neigh_event_ns(struct neigh_table *tbl,
 						 lladdr || !dev->addr_len);
 	if (neigh) {
 		if (neigh_probe_enable) {
-			if (neigh->nud_state != NUD_REACHABLE &&
-			    neigh->nud_state != NUD_PERMANENT) {
+			if (!(neigh->nud_state == NUD_REACHABLE)) {
 				neigh_update(neigh, lladdr, NUD_STALE,
-					 NEIGH_UPDATE_F_OVERRIDE);
+					     NEIGH_UPDATE_F_OVERRIDE);
 				write_lock(&neigh->lock);
 				neigh_probe(neigh);
 				neigh_update_notify(neigh);
@@ -1340,7 +1340,7 @@ int neigh_resolve_output(struct neighbour *neigh, struct sk_buff *skb)
 		struct net_device *dev = neigh->dev;
 		unsigned int seq;
 
-		if (dev->header_ops->cache && !READ_ONCE(neigh->hh.hh_len))
+		if (dev->header_ops->cache && !neigh->hh.hh_len)
 			neigh_hh_init(neigh);
 
 		do {
@@ -1855,8 +1855,8 @@ static int neightbl_fill_info(struct sk_buff *skb, struct neigh_table *tbl,
 		goto nla_put_failure;
 	{
 		unsigned long now = jiffies;
-		long flush_delta = now - tbl->last_flush;
-		long rand_delta = now - tbl->last_rand;
+		unsigned int flush_delta = now - tbl->last_flush;
+		unsigned int rand_delta = now - tbl->last_rand;
 		struct neigh_hash_table *nht;
 		struct ndt_config ndc = {
 			.ndtc_key_len		= tbl->key_len,

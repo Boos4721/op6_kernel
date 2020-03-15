@@ -848,7 +848,7 @@ int ib_nl_handle_set_timeout(struct sk_buff *skb,
 	}
 
 settimeout_out:
-	return 0;
+	return skb->len;
 }
 
 static inline int ib_nl_is_good_resolve_resp(const struct nlmsghdr *nlh)
@@ -920,7 +920,7 @@ int ib_nl_handle_resolve_resp(struct sk_buff *skb,
 	}
 
 resp_out:
-	return 0;
+	return skb->len;
 }
 
 static void free_sm_ah(struct kref *kref)

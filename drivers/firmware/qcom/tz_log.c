@@ -947,7 +947,6 @@ err1:
 	g_ion_clnt = NULL;
 }
 
-//WayneChang, 2016/10/28, add procfs for qsee_log due to oemlogkit cannot access debugfs in android N
 static ssize_t proc_qsee_log_func(struct file *file, char __user *user_buf, size_t count, loff_t *ppos)
 {
 	int len = 0;
@@ -1243,7 +1242,6 @@ static int tz_log_probe(struct platform_device *pdev)
 	if (tzdbgfs_init(pdev))
 		goto err;
 
-//WayneChang, 2016/10/28, add procfs for qsee_log due to oemlogkit cannot access debugfs in android N
 	if (tzprocfs_init(pdev))
 		goto err;
 

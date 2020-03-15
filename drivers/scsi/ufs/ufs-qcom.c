@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2019, Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2017, Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,8 +37,6 @@
 #define MAX_PROP_SIZE		   32
 #define VDDP_REF_CLK_MIN_UV        1200000
 #define VDDP_REF_CLK_MAX_UV        1200000
-/* TODO: further tuning for this parameter may be required */
-#define UFS_QCOM_PM_QOS_UNVOTE_TIMEOUT_US	(10000) /* microseconds */
 
 #define UFS_QCOM_DEFAULT_DBG_PRINT_EN	\
 	(UFS_QCOM_DBG_PRINT_REGS_EN | UFS_QCOM_DBG_PRINT_TEST_BUS_EN)
@@ -727,11 +725,6 @@ static int ufs_qcom_config_vreg(struct device *dev,
 
 	reg = vreg->reg;
 	if (regulator_count_voltages(reg) > 0) {
-		uA_load = on ? vreg->max_uA : 0;
-		ret = regulator_set_load(vreg->reg, uA_load);
-		if (ret)
-			goto out;
-
 		min_uV = on ? vreg->min_uV : 0;
 		ret = regulator_set_voltage(reg, min_uV, vreg->max_uV);
 		if (ret) {
@@ -739,6 +732,11 @@ static int ufs_qcom_config_vreg(struct device *dev,
 					__func__, vreg->name, ret);
 			goto out;
 		}
+
+		uA_load = on ? vreg->max_uA : 0;
+		ret = regulator_set_load(vreg->reg, uA_load);
+		if (ret)
+			goto out;
 	}
 out:
 	return ret;
@@ -897,21 +895,17 @@ static int ufs_qcom_crypto_req_setup(struct ufs_hba *hba,
 		req = lrbp->cmd->request;
 	else
 		return 0;
-
-	/* Use request LBA or given dun as the DUN value */
+	/*
+	 * Right now ICE do not support variable dun but can be
+	 * taken as future enhancement
+	 * if (bio_dun(req->bio)) {
+	 *      dun @bio can be split, so we have to adjust offset
+	 *      *dun = bio_dun(req->bio);
+	 * } else
+	 */
 	if (req->bio) {
-#ifdef CONFIG_PFK
-		if (bio_dun(req->bio)) {
-			/* dun @bio can be split, so we have to adjust offset */
-			*dun = bio_dun(req->bio);
-		} else {
-			*dun = req->bio->bi_iter.bi_sector;
-			*dun >>= UFS_QCOM_ICE_TR_DATA_UNIT_4_KB;
-		}
-#else
 		*dun = req->bio->bi_iter.bi_sector;
 		*dun >>= UFS_QCOM_ICE_TR_DATA_UNIT_4_KB;
-#endif
 	}
 
 	ret = ufs_qcom_ice_req_setup(host, lrbp->cmd, cc_index, enable);
@@ -1308,11 +1302,11 @@ static void ufs_qcom_dev_ref_clk_ctrl(struct ufs_qcom_host *host, bool enable)
 		/*
 		 * If we are here to disable this clock it might be immediately
 		 * after entering into hibern8 in which case we need to make
-		 * sure that device ref_clk is active for a given time after the
-		 * hibern8 enter for pre UFS3.0 devices
+		 * sure that device ref_clk is active at least 1us after the
+		 * hibern8 enter.
 		 */
 		if (!enable)
-			udelay(host->hba->dev_ref_clk_gating_wait);
+			udelay(1);
 
 		writel_relaxed(temp, host->dev_ref_clk_ctrl_mmio);
 
@@ -1321,16 +1315,11 @@ static void ufs_qcom_dev_ref_clk_ctrl(struct ufs_qcom_host *host, bool enable)
 
 		/*
 		 * If we call hibern8 exit after this, we need to make sure that
-		 * device ref_clk is stable for a given time before the hibern8
+		 * device ref_clk is stable for at least 1us before the hibern8
 		 * exit command.
 		 */
-		if (enable) {
-			if (host->hba->dev_info.quirks &
-			    UFS_DEVICE_QUIRK_WAIT_AFTER_REF_CLK_UNGATE)
-				usleep_range(50, 60);
-			else
-				udelay(1);
-		}
+		if (enable)
+			udelay(1);
 
 		host->is_dev_ref_clk_enabled = enable;
 	}
@@ -1728,8 +1717,7 @@ static void ufs_qcom_pm_qos_unvote_work(struct work_struct *work)
 	group->state = PM_QOS_UNVOTED;
 	spin_unlock_irqrestore(host->hba->host->host_lock, flags);
 
-	pm_qos_update_request_timeout(&group->req,
-		group->latency_us, UFS_QCOM_PM_QOS_UNVOTE_TIMEOUT_US);
+	pm_qos_update_request(&group->req, PM_QOS_DEFAULT_VALUE);
 }
 
 static ssize_t ufs_qcom_pm_qos_enable_show(struct device *dev,
@@ -1897,9 +1885,8 @@ static int ufs_qcom_pm_qos_init(struct ufs_qcom_host *host)
 		if (ret)
 			goto free_groups;
 
-		host->pm_qos.groups[i].req.type = PM_QOS_REQ_AFFINE_CORES;
-		host->pm_qos.groups[i].req.cpus_affine =
-			host->pm_qos.groups[i].mask;
+		host->pm_qos.groups[i].req.type = PM_QOS_REQ_AFFINE_IRQ;
+		host->pm_qos.groups[i].req.irq = host->hba->irq;
 		host->pm_qos.groups[i].state = PM_QOS_UNVOTED;
 		host->pm_qos.groups[i].active_reqs = 0;
 		host->pm_qos.groups[i].host = host;

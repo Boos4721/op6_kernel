@@ -44,7 +44,6 @@ struct external_battery_gauge {
 	int (*get_average_current)(void);
 	int (*get_batt_cc)(void);
 	int (*get_batt_fcc)(void);
-	/*2015/01/06  Modify for  sync with KK charge standard  */
 	bool (*fast_chg_started)(void);
 	bool (*fast_switch_to_normal)(void);
 	int (*set_switch_to_noraml_false)(void);
@@ -63,7 +62,6 @@ struct external_battery_gauge {
 	int (*fast_chg_started_status)(bool status);
 	bool (*get_fastchg_firmware_already_updated)(void);
 	int (*get_device_type)(void);
-	/* david.liu@bsp, 20161025 Add BQ27411 dash charging */
 };
 
 struct notify_dash_event {
@@ -126,12 +124,10 @@ extern bool get_oem_charge_done_status(void);
 extern int load_soc(void);
 extern void backup_soc_ex(int soc);
 extern void clean_backup_soc_ex(void);
-/*add for dash adapter update*/
 extern void op_bus_vote(int disable);
 extern bool dash_adapter_update_is_tx_gpio(unsigned int  gpio_num);
 extern bool dash_adapter_update_is_rx_gpio(unsigned  int gpio_num);
 extern int is_hw_support_n76e(void);
-/* @bsp 2018/09/05 FAT-4556 fix the audio heaset pop issue when shutdown*/
 extern bool audio_adapter_flag;
 
 void op_switch_normal_set(void);

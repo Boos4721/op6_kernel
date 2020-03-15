@@ -192,11 +192,6 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max_low,
 #ifdef CONFIG_HAVE_ARCH_PFN_VALID
 int pfn_valid(unsigned long pfn)
 {
-	phys_addr_t addr = __pfn_to_phys(pfn);
-
-	if (__phys_to_pfn(addr) != pfn)
-		return 0;
-
 	return memblock_is_map_memory(__pfn_to_phys(pfn));
 }
 EXPORT_SYMBOL(pfn_valid);
@@ -721,14 +716,11 @@ static inline void pte_update(unsigned long addr, pteval_t mask,
 				  pteval_t prot, struct mm_struct *mm)
 {
 	struct pte_data data;
-	struct mm_struct *apply_mm = mm;
 
 	data.mask = mask;
 	data.val = prot;
 
-	if (addr >= PAGE_OFFSET)
-		apply_mm = &init_mm;
-	apply_to_page_range(apply_mm, addr, SECTION_SIZE, __pte_update, &data);
+	apply_to_page_range(mm, addr, SECTION_SIZE, __pte_update, &data);
 	flush_tlb_kernel_range(addr, addr + SECTION_SIZE);
 }
 
@@ -806,8 +798,7 @@ static void update_sections_early(struct section_perm perms[], int n)
 		if (t->flags & PF_KTHREAD)
 			continue;
 		for_each_thread(t, s)
-			if (s->mm)
-				set_section_perms(perms, n, true, s->mm);
+			set_section_perms(perms, n, true, s->mm);
 	}
 	read_unlock(&tasklist_lock);
 	set_section_perms(perms, n, true, current->active_mm);

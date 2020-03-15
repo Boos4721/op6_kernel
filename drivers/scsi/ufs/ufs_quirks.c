@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -14,7 +14,6 @@
 #include "ufshcd.h"
 #include "ufs_quirks.h"
 
-/* liochen@BSP, 2016/11/30, Add ufs info into *##*37847# */
 #include <linux/project_info.h>
 
 static struct ufs_card_fix ufs_fixups[] = {
@@ -31,8 +30,6 @@ static struct ufs_card_fix ufs_fixups[] = {
 	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL,
 		UFS_DEVICE_QUIRK_HOST_PA_SAVECONFIGTIME),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL, UFS_DEVICE_NO_VCCQ),
-	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL,
-		UFS_DEVICE_QUIRK_WAIT_AFTER_REF_CLK_UNGATE),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, "hB8aL1",
 		UFS_DEVICE_QUIRK_HS_G1_TO_HS_G3_SWITCH),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, "hC8aL1",
@@ -51,7 +48,6 @@ static struct ufs_card_fix ufs_fixups[] = {
 	END_FIX
 };
 
-/* liochen@BSP, 2016/11/30, Add ufs info into *##*37847# */
 static int ufs_get_capacity_info(struct ufs_hba *hba,  u64 *pcapacity)
 {
        int err;
@@ -96,7 +92,6 @@ static char* ufs_get_capacity_size(u64 capacity)
        }
 }
 
-/* liochen@BSP, 2016/11/30, Add ufs info into *##*37847# */
 char ufs_vendor_and_rev[32] = {'\0'};
 char ufs_product_id[32] = {'\0'};
 int ufs_fill_info(struct ufs_hba *hba)

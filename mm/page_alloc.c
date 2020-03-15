@@ -65,7 +65,8 @@
 #include <linux/kthread.h>
 #include <linux/memcontrol.h>
 #include <linux/show_mem_notifier.h>
-#include <linux/psi.h>
+#include <linux/cpu_input_boost.h>
+#include <linux/devfreq_boost.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -98,6 +99,7 @@ volatile unsigned long latent_entropy __latent_entropy;
 EXPORT_SYMBOL(latent_entropy);
 #endif
 
+unsigned long alloc_slow_nr;
 /*
  * Array of node states.
  */
@@ -271,9 +273,8 @@ int watermark_scale_factor;
  */
 int extra_free_kbytes;
 
-#ifdef CONFIG_KSWAPD_LAZY_RECLAIM
 atomic_t alloc_ongoing = ATOMIC_INIT(0);
-#endif
+
 static unsigned long __meminitdata nr_kernel_pages;
 static unsigned long __meminitdata nr_all_pages;
 static unsigned long __meminitdata dma_reserve;
@@ -1961,7 +1962,8 @@ static void change_pageblock_range(struct page *pageblock_page,
  * is worse than movable allocations stealing from unmovable and reclaimable
  * pageblocks.
  */
-static bool can_steal_fallback(unsigned int order, int start_mt)
+static bool can_steal_fallback(unsigned int current_order, unsigned int start_order,
+			       int start_mt, int fallback_mt)
 {
 	/*
 	 * Leaving this order check is intended, although there is
@@ -1970,12 +1972,17 @@ static bool can_steal_fallback(unsigned int order, int start_mt)
 	 * but, below check doesn't guarantee it and that is just heuristic
 	 * so could be changed anytime.
 	 */
-	if (order >= pageblock_order)
+	if (current_order >= pageblock_order)
 		return true;
 
-	if (order >= pageblock_order / 2 ||
+	/* don't let unmovable allocations cause migrations simply because of free pages */
+	if ((start_mt != MIGRATE_UNMOVABLE && current_order >= pageblock_order / 2) ||
+	        /* only steal reclaimable page blocks for unmovable allocations */
+	        (start_mt == MIGRATE_UNMOVABLE && fallback_mt != MIGRATE_MOVABLE && current_order >= pageblock_order / 2) ||
+	        /* reclaimable can steal aggressively */
 		start_mt == MIGRATE_RECLAIMABLE ||
-		start_mt == MIGRATE_UNMOVABLE ||
+		/* allow unmovable allocs up to 64K without migrating blocks */
+		(start_mt == MIGRATE_UNMOVABLE && start_order >= 5) ||
 		page_group_by_mobility_disabled)
 		return true;
 
@@ -2015,8 +2022,9 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
  * we can steal other freepages all together. This would help to reduce
  * fragmentation due to mixed migratetype pages in one pageblock.
  */
-int find_suitable_fallback(struct free_area *area, unsigned int order,
-			int migratetype, bool only_stealable, bool *can_steal)
+int find_suitable_fallback(struct free_area *area, unsigned int current_order,
+			   int migratetype, bool only_stealable,
+			   int start_order, bool *can_steal)
 {
 	int i;
 	int fallback_mt;
@@ -2033,7 +2041,7 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
 		if (list_empty(&area->free_list[fallback_mt]))
 			continue;
 
-		if (can_steal_fallback(order, migratetype))
+		if (can_steal_fallback(current_order, start_order, migratetype, fallback_mt))
 			*can_steal = true;
 
 		if (!only_stealable)
@@ -2182,7 +2190,7 @@ __rmqueue_fallback(struct zone *zone, unsigned int order, int start_migratetype)
 				--current_order) {
 		area = &(zone->free_area[current_order]);
 		fallback_mt = find_suitable_fallback(area, current_order,
-				start_migratetype, false, &can_steal);
+				start_migratetype, false, order, &can_steal);
 		if (fallback_mt == -1)
 			continue;
 
@@ -3251,20 +3259,15 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 		enum compact_priority prio, enum compact_result *compact_result)
 {
 	struct page *page;
-	unsigned long pflags;
 	unsigned int noreclaim_flag = current->flags & PF_MEMALLOC;
 
 	if (!order)
 		return NULL;
 
-	psi_memstall_enter(&pflags);
 	current->flags |= PF_MEMALLOC;
-
 	*compact_result = try_to_compact_pages(gfp_mask, order, alloc_flags, ac,
 									prio);
-
 	current->flags = (current->flags & ~PF_MEMALLOC) | noreclaim_flag;
-	psi_memstall_leave(&pflags);
 
 	if (*compact_result <= COMPACT_INACTIVE)
 		return NULL;
@@ -3444,13 +3447,11 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 {
 	struct reclaim_state reclaim_state;
 	int progress;
-	unsigned long pflags;
 
 	cond_resched();
 
 	/* We now go into synchronous reclaim */
 	cpuset_memory_pressure_bump();
-	psi_memstall_enter(&pflags);
 	current->flags |= PF_MEMALLOC;
 	lockdep_set_current_reclaim_state(gfp_mask);
 	reclaim_state.reclaimed_slab = 0;
@@ -3462,7 +3463,6 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 	current->reclaim_state = NULL;
 	lockdep_clear_current_reclaim_state();
 	current->flags &= ~PF_MEMALLOC;
-	psi_memstall_leave(&pflags);
 
 	cond_resched();
 
@@ -3505,22 +3505,18 @@ static void wake_all_kswapds(unsigned int order, const struct alloc_context *ac)
 	struct zoneref *z;
 	struct zone *zone;
 	pg_data_t *last_pgdat = NULL;
-#ifdef CONFIG_KSWAPD_LAZY_RECLAIM
-	struct task_struct *kswapd;
-#endif
+	struct task_struct* kswapd;
 
 	for_each_zone_zonelist_nodemask(zone, z, ac->zonelist,
 					ac->high_zoneidx, ac->nodemask) {
 		if (last_pgdat != zone->zone_pgdat)
 			wakeup_kswapd(zone, order, ac->high_zoneidx);
 		last_pgdat = zone->zone_pgdat;
-#ifdef CONFIG_KSWAPD_LAZY_RECLAIM
 		kswapd = zone->zone_pgdat->kswapd;
 
 		/* early state check to prevent memory barrier and spinlock */
 		if (ac->lr_handle && kswapd->state == TASK_INTERRUPTIBLE)
 			wake_up_state(kswapd, TASK_INTERRUPTIBLE);
-#endif
 	}
 }
 
@@ -3689,8 +3685,6 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	int compaction_retries;
 	int no_progress_loops;
 	unsigned int cpuset_mems_cookie;
-	pg_data_t *pgdat = ac->preferred_zoneref->zone->zone_pgdat;
-	bool woke_kswapd = false;
 
 	/*
 	 * In the slowpath, we sanity check order to avoid ever trying to
@@ -3735,13 +3729,8 @@ retry_cpuset:
 	 */
 	alloc_flags = gfp_to_alloc_flags(gfp_mask);
 
-	if (gfp_mask & __GFP_KSWAPD_RECLAIM) {
-		if (!woke_kswapd) {
-			atomic_inc(&pgdat->kswapd_waiters);
-			woke_kswapd = true;
-		}
+	if (gfp_mask & __GFP_KSWAPD_RECLAIM)
 		wake_all_kswapds(order, ac);
-	}
 
 	/*
 	 * The adjusted alloc_flags might result in immediate success, so try
@@ -3867,6 +3856,10 @@ retry:
 	if (order > PAGE_ALLOC_COSTLY_ORDER && !(gfp_mask & __GFP_REPEAT))
 		goto nopage;
 
+	/* Boost when memory is low so allocation latency doesn't get too bad */
+	cpu_input_boost_kick_max(100);
+	devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, 100);
+
 	if (should_reclaim_retry(gfp_mask, order, ac, alloc_flags,
 				 did_some_progress > 0, &no_progress_loops))
 		goto retry;
@@ -3913,12 +3906,9 @@ nopage:
 	if (read_mems_allowed_retry(cpuset_mems_cookie))
 		goto retry_cpuset;
 
+	warn_alloc(gfp_mask,
+			"page allocation failure: order:%u", order);
 got_pg:
-	if (woke_kswapd)
-		atomic_dec(&pgdat->kswapd_waiters);
-	if (!page)
-		warn_alloc(gfp_mask,
-				"page allocation failure: order:%u", order);
 	return page;
 }
 
@@ -3937,9 +3927,7 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order,
 		.zonelist = zonelist,
 		.nodemask = nodemask,
 		.migratetype = gfpflags_to_migratetype(gfp_mask),
-#ifdef CONFIG_KSWAPD_LAZY_RECLAIM
 		.lr_handle = false,
-#endif
 	};
 
 	if (cpusets_enabled()) {
@@ -3965,12 +3953,10 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order,
 	 */
 	if (unlikely(!zonelist->_zonerefs->zone))
 		return NULL;
-#ifdef CONFIG_KSWAPD_LAZY_RECLAIM
 	if (current->signal->oom_score_adj <= vm_breath_priority) {
 		ac.lr_handle = true;
 		atomic_inc(&alloc_ongoing);
 	}
-#endif
 
 	if (IS_ENABLED(CONFIG_CMA) && ac.migratetype == MIGRATE_MOVABLE)
 		alloc_flags |= ALLOC_CMA;
@@ -4028,10 +4014,8 @@ out:
 		kmemcheck_pagealloc_alloc(page, order, gfp_mask);
 
 	trace_mm_page_alloc(page, order, alloc_mask, ac.migratetype);
-#ifdef CONFIG_KSWAPD_LAZY_RECLAIM
 	if (ac.lr_handle)
 		atomic_dec(&alloc_ongoing);
-#endif
 
 	return page;
 }
@@ -4109,8 +4093,10 @@ static struct page *__page_frag_refill(struct page_frag_cache *nc,
 				PAGE_FRAG_CACHE_MAX_ORDER);
 	nc->size = page ? PAGE_FRAG_CACHE_MAX_SIZE : PAGE_SIZE;
 #endif
-	if (unlikely(!page))
+	if (unlikely(!page)) {
+		gfp |= __GFP_KSWAPD_RECLAIM;
 		page = alloc_pages_node(NUMA_NO_NODE, gfp, 0);
+	}
 
 	nc->va = page ? page_address(page) : NULL;
 
@@ -4355,13 +4341,6 @@ long si_mem_available(void)
 	available += global_page_state(NR_SLAB_RECLAIMABLE) -
 		     min(global_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low);
 
-	/*
-	 * Part of the kernel memory, which can be released under memory
-	 * pressure.
-	 */
-	available += global_node_page_state(NR_INDIRECTLY_RECLAIMABLE_BYTES) >>
-		PAGE_SHIFT;
-
 	if (available < 0)
 		available = 0;
 	return available;
@@ -4492,9 +4471,8 @@ void show_free_areas(unsigned int filter)
 		" unevictable:%lu dirty:%lu writeback:%lu unstable:%lu\n"
 		" slab_reclaimable:%lu slab_unreclaimable:%lu\n"
 		" mapped:%lu shmem:%lu pagetables:%lu bounce:%lu\n"
-/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-		" ramboost:%lu\n"
-		" free:%lu free_pcp:%lu free_cma:%lu\n",
+		" free:%lu free_pcp:%lu free_cma:%lu\n"
+		" ramboost:%lu\n",
 		global_node_page_state(NR_ACTIVE_ANON),
 		global_node_page_state(NR_INACTIVE_ANON),
 		global_node_page_state(NR_ISOLATED_ANON),
@@ -4511,11 +4489,10 @@ void show_free_areas(unsigned int filter)
 		global_node_page_state(NR_SHMEM),
 		global_page_state(NR_PAGETABLE),
 		global_page_state(NR_BOUNCE),
-/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-		UID_LRU_SIZE,
 		global_page_state(NR_FREE_PAGES),
 		free_pcp,
-		global_page_state(NR_FREE_CMA_PAGES));
+		global_page_state(NR_FREE_CMA_PAGES),
+		global_page_state(NR_ZONE_UID_LRU));
 
 	for_each_online_pgdat(pgdat) {
 		printk("Node %d"
@@ -4596,9 +4573,8 @@ void show_free_areas(unsigned int filter)
 			" bounce:%lukB"
 			" free_pcp:%lukB"
 			" local_pcp:%ukB"
-/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-			" ramboost:%lukB"
 			" free_cma:%lukB"
+			" ramboost:%lukB"
 			"\n",
 			zone->name,
 			K(zone_page_state(zone, NR_FREE_PAGES)),
@@ -4621,9 +4597,8 @@ void show_free_areas(unsigned int filter)
 			K(zone_page_state(zone, NR_BOUNCE)),
 			K(free_pcp),
 			K(this_cpu_read(zone->pageset->pcp.count)),
-/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-			K(ZONE_UID_LRU_SIZE(zone)),
-			K(zone_page_state(zone, NR_FREE_CMA_PAGES)));
+			K(zone_page_state(zone, NR_FREE_CMA_PAGES)),
+			K(zone_page_state(zone, NR_ZONE_UID_LRU)));
 		printk("lowmem_reserve[]:");
 		for (i = 0; i < MAX_NR_ZONES; i++)
 			printk(KERN_CONT " %ld", zone->lowmem_reserve[i]);
@@ -5998,7 +5973,6 @@ static void __paginginit free_area_init_core(struct pglist_data *pgdat)
 	pgdat_page_ext_init(pgdat);
 	spin_lock_init(&pgdat->lru_lock);
 	lruvec_init(node_lruvec(pgdat));
-	pgdat->kswapd_waiters = (atomic_t)ATOMIC_INIT(0);
 
 	for (j = 0; j < MAX_NR_ZONES; j++) {
 		struct zone *zone = pgdat->node_zones + j;

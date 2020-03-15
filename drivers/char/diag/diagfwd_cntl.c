@@ -619,12 +619,7 @@ static int update_msg_mask_tbl_entry(struct diag_msg_mask_t *mask,
 	}
 	if (range->ssid_last >= mask->ssid_last) {
 		temp_range = range->ssid_last - mask->ssid_first + 1;
-		if (temp_range > MAX_SSID_PER_RANGE) {
-			temp_range = MAX_SSID_PER_RANGE;
-			mask->ssid_last = mask->ssid_first + temp_range - 1;
-		} else
-			mask->ssid_last = range->ssid_last;
-		mask->ssid_last_tools = mask->ssid_last;
+		mask->ssid_last = range->ssid_last;
 		mask->range = temp_range;
 	}
 
@@ -673,7 +668,7 @@ static void process_ssid_range_report(uint8_t *buf, uint32_t len,
 		mask_ptr = (struct diag_msg_mask_t *)msg_mask.ptr;
 		found = 0;
 		for (j = 0; j < driver->msg_mask_tbl_count; j++, mask_ptr++) {
-			if (!mask_ptr->ptr || !ssid_range) {
+			if (!mask_ptr || !ssid_range) {
 				found = 1;
 				break;
 			}
@@ -752,7 +747,7 @@ static void diag_build_time_mask_update(uint8_t *buf,
 	num_items = range->ssid_last - range->ssid_first + 1;
 
 	for (i = 0; i < driver->bt_msg_mask_tbl_count; i++, build_mask++) {
-		if (!build_mask->ptr) {
+		if (!build_mask) {
 			found = 1;
 			break;
 		}
@@ -845,7 +840,6 @@ int diag_add_diag_id_to_list(uint8_t diag_id, char *process_name,
 	uint8_t pd_val, uint8_t peripheral)
 {
 	struct diag_id_tbl_t *new_item = NULL;
-	int process_len = 0;
 
 	if (!process_name || diag_id == 0) {
 		DIAG_LOG(DIAG_DEBUG_PERIPHERALS,
@@ -858,8 +852,7 @@ int diag_add_diag_id_to_list(uint8_t diag_id, char *process_name,
 	if (!new_item)
 		return -ENOMEM;
 	kmemleak_not_leak(new_item);
-	process_len = strlen(process_name);
-	new_item->process_name = kzalloc(process_len + 1, GFP_KERNEL);
+	new_item->process_name = kzalloc(strlen(process_name) + 1, GFP_KERNEL);
 	if (!new_item->process_name) {
 		kfree(new_item);
 		new_item = NULL;
@@ -869,7 +862,7 @@ int diag_add_diag_id_to_list(uint8_t diag_id, char *process_name,
 	new_item->diag_id = diag_id;
 	new_item->pd_val = pd_val;
 	new_item->peripheral = peripheral;
-	strlcpy(new_item->process_name, process_name, process_len + 1);
+	strlcpy(new_item->process_name, process_name, strlen(process_name) + 1);
 	INIT_LIST_HEAD(&new_item->link);
 	mutex_lock(&driver->diag_id_mutex);
 	list_add_tail(&new_item->link, &driver->diag_id_list);
@@ -971,7 +964,7 @@ static void process_diagid(uint8_t *buf, uint32_t len,
 	ctrl_pkt.pkt_id = DIAG_CTRL_MSG_DIAGID;
 	ctrl_pkt.version = 1;
 	strlcpy((char *)&ctrl_pkt.process_name, process_name,
-		sizeof(ctrl_pkt.process_name));
+		strlen(process_name) + 1);
 	ctrl_pkt.len = sizeof(ctrl_pkt.diag_id) + sizeof(ctrl_pkt.version) +
 			strlen(process_name) + 1;
 	err = diagfwd_write(peripheral, TYPE_CNTL, &ctrl_pkt, ctrl_pkt.len +
@@ -1092,7 +1085,7 @@ static int diag_compute_real_time(int idx)
 		 * connection.
 		 */
 		real_time = MODE_REALTIME;
-	} else if (driver->usb_connected || driver->pcie_connected) {
+	} else if (driver->usb_connected) {
 		/*
 		 * If USB is connected, check individual process. If Memory
 		 * Device Mode is active, set the mode requested by Memory

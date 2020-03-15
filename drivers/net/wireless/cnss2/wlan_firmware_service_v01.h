@@ -396,13 +396,9 @@ extern struct elem_info wlfw_cal_report_resp_msg_v01_ei[];
 
 struct wlfw_initiate_cal_download_ind_msg_v01 {
 	enum wlfw_cal_temp_id_enum_v01 cal_id;
-	u8 total_size_valid;
-	u32 total_size;
-	u8 cal_data_location_valid;
-	u32 cal_data_location;
 };
 
-#define WLFW_INITIATE_CAL_DOWNLOAD_IND_MSG_V01_MAX_MSG_LEN 21
+#define WLFW_INITIATE_CAL_DOWNLOAD_IND_MSG_V01_MAX_MSG_LEN 7
 extern struct elem_info wlfw_initiate_cal_download_ind_msg_v01_ei[];
 
 struct wlfw_cal_download_req_msg_v01 {
@@ -418,11 +414,9 @@ struct wlfw_cal_download_req_msg_v01 {
 	u8 data[QMI_WLFW_MAX_DATA_SIZE_V01];
 	u8 end_valid;
 	u8 end;
-	u8 cal_data_location_valid;
-	u32 cal_data_location;
 };
 
-#define WLFW_CAL_DOWNLOAD_REQ_MSG_V01_MAX_MSG_LEN 6185
+#define WLFW_CAL_DOWNLOAD_REQ_MSG_V01_MAX_MSG_LEN 6178
 extern struct elem_info wlfw_cal_download_req_msg_v01_ei[];
 
 struct wlfw_cal_download_resp_msg_v01 {
@@ -435,11 +429,9 @@ extern struct elem_info wlfw_cal_download_resp_msg_v01_ei[];
 struct wlfw_initiate_cal_update_ind_msg_v01 {
 	enum wlfw_cal_temp_id_enum_v01 cal_id;
 	u32 total_size;
-	u8 cal_data_location_valid;
-	u32 cal_data_location;
 };
 
-#define WLFW_INITIATE_CAL_UPDATE_IND_MSG_V01_MAX_MSG_LEN 21
+#define WLFW_INITIATE_CAL_UPDATE_IND_MSG_V01_MAX_MSG_LEN 14
 extern struct elem_info wlfw_initiate_cal_update_ind_msg_v01_ei[];
 
 struct wlfw_cal_update_req_msg_v01 {
@@ -463,11 +455,9 @@ struct wlfw_cal_update_resp_msg_v01 {
 	u8 data[QMI_WLFW_MAX_DATA_SIZE_V01];
 	u8 end_valid;
 	u8 end;
-	u8 cal_data_location_valid;
-	u32 cal_data_location;
 };
 
-#define WLFW_CAL_UPDATE_RESP_MSG_V01_MAX_MSG_LEN 6188
+#define WLFW_CAL_UPDATE_RESP_MSG_V01_MAX_MSG_LEN 6181
 extern struct elem_info wlfw_cal_update_resp_msg_v01_ei[];
 
 struct wlfw_msa_info_req_msg_v01 {
@@ -610,11 +600,9 @@ struct wlfw_host_cap_req_msg_v01 {
 	u32 mem_bucket;
 	u8 mem_cfg_mode_valid;
 	u8 mem_cfg_mode;
-	u8 cal_duration_valid;
-	u16 cal_duration;
 };
 
-#define WLFW_HOST_CAP_REQ_MSG_V01_MAX_MSG_LEN 194
+#define WLFW_HOST_CAP_REQ_MSG_V01_MAX_MSG_LEN 189
 extern struct elem_info wlfw_host_cap_req_msg_v01_ei[];
 
 struct wlfw_host_cap_resp_msg_v01 {

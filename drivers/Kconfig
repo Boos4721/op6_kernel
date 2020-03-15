@@ -138,8 +138,6 @@ source "drivers/hv/Kconfig"
 
 source "drivers/xen/Kconfig"
 
-source "drivers/vservices/Kconfig"
-
 source "drivers/staging/Kconfig"
 
 source "drivers/platform/Kconfig"
@@ -209,9 +207,14 @@ source "drivers/hwtracing/intel_th/Kconfig"
 source "drivers/fpga/Kconfig"
 
 source "drivers/sensors/Kconfig"
+source "drivers/oem_debug/Kconfig"
 
-source "drivers/tee/Kconfig"
+source "drivers/oem_debug/Kconfig"
+source "drivers/oneplus/Kconfig"
+source "drivers/param_read_write/Kconfig"
 
 source "drivers/oneplus/Kconfig"
+
+source "drivers/tee/Kconfig"
 
 endmenu

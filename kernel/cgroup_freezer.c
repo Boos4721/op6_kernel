@@ -22,7 +22,6 @@
 #include <linux/freezer.h>
 #include <linux/seq_file.h>
 #include <linux/mutex.h>
-#include <linux/types.h>
 
 /*
  * A cgroup is freezing if any FREEZING flags are set.  FREEZING_SELF is
@@ -324,7 +323,6 @@ static void freeze_cgroup(struct freezer *freezer)
 
 	css_task_iter_start(&freezer->css, &it);
 	while ((task = css_task_iter_next(&it)))
-		//huruihuan add for freezing task in cgroup despite of PF_FREEZER_SKIP flag
 		freeze_cgroup_task(task);
 	css_task_iter_end(&it);
 }
@@ -335,26 +333,18 @@ static void unfreeze_cgroup(struct freezer *freezer)
 	struct task_struct *task;
 	struct task_struct *tmp_tsk = NULL;
 	struct task_struct *g, *p;
-	uid_t uid_val = 0;
 
 	css_task_iter_start(&freezer->css, &it);
 	while ((task = css_task_iter_next(&it))) {
 		tmp_tsk = task;
 		__thaw_task(task);
 	}
-
-	if (tmp_tsk && tmp_tsk->real_cred)
-		uid_val = tmp_tsk->real_cred->uid.val;
-
 	css_task_iter_end(&it);
-
-	if (!uid_val)
-		return;
-
 /*make sure all the thread of one uid been wake up by huruihuan*/
 	read_lock(&tasklist_lock);
 	do_each_thread(g, p) {
-		if (p->real_cred && p->real_cred->uid.val == uid_val)
+		if (tmp_tsk && tmp_tsk->real_cred && p->real_cred &&
+			p->real_cred->uid.val == tmp_tsk->real_cred->uid.val)
 			__thaw_task(p);
 	} while_each_thread(g, p);
 	read_unlock(&tasklist_lock);

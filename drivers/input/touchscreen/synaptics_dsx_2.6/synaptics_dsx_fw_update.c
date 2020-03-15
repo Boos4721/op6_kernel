@@ -44,9 +44,10 @@
 #include "synaptics_dsx_core.h"
 
 #define FW_IMAGE_NAME "synaptics/startup_fw_update.img"
-
+/*
 #define DO_STARTUP_FW_UPDATE
-
+*/
+/*
 #ifdef DO_STARTUP_FW_UPDATE
 #ifdef CONFIG_FB
 #define WAIT_FOR_FB_READY
@@ -54,7 +55,7 @@
 #define FB_READY_TIMEOUT_S 30
 #endif
 #endif
-
+*/
 #define FORCE_UPDATE false
 #define DO_LOCKDOWN false
 
@@ -1951,7 +1952,7 @@ static int fwu_write_f34_v7_blocks(unsigned char *block_ptr,
 			return retval;
 		}
 
-		retval = fwu_wait_for_idle(WRITE_WAIT_MS, true);
+		retval = fwu_wait_for_idle(WRITE_WAIT_MS, false);
 		if (retval < 0) {
 			dev_err(rmi4_data->pdev->dev.parent,
 					"%s: Failed to wait for idle status (%d blocks remaining)\n",
@@ -1961,8 +1962,6 @@ static int fwu_write_f34_v7_blocks(unsigned char *block_ptr,
 
 		block_ptr += (transfer * fwu->block_size);
 		remaining -= transfer;
-		dev_dbg(rmi4_data->pdev->dev.parent, "%s: remaining %d\n",
-					__func__, remaining);
 	} while (remaining);
 
 	return 0;
@@ -2012,7 +2011,7 @@ static int fwu_write_f34_v5v6_blocks(unsigned char *block_ptr,
 			return retval;
 		}
 
-		retval = fwu_wait_for_idle(WRITE_WAIT_MS, true);
+		retval = fwu_wait_for_idle(WRITE_WAIT_MS, false);
 		if (retval < 0) {
 			dev_err(rmi4_data->pdev->dev.parent,
 					"%s: Failed to wait for idle status (block %d)\n",
@@ -2021,8 +2020,6 @@ static int fwu_write_f34_v5v6_blocks(unsigned char *block_ptr,
 		}
 
 		block_ptr += fwu->block_size;
-		dev_dbg(rmi4_data->pdev->dev.parent, "%s: remaining %d\n",
-					__func__, block_cnt - blk);
 	}
 
 	return 0;
@@ -3422,7 +3419,6 @@ static int fwu_start_reflash(void)
 	enum flash_area flash_area;
 	const struct firmware *fw_entry = NULL;
 	struct synaptics_rmi4_data *rmi4_data = fwu->rmi4_data;
-	const unsigned char *image_name;
 
 	if (rmi4_data->sensor_sleep) {
 		dev_err(rmi4_data->pdev->dev.parent,
@@ -3438,14 +3434,9 @@ static int fwu_start_reflash(void)
 	pr_notice("%s: Start of reflash process\n", __func__);
 
 	if (fwu->image == NULL) {
-		if (rmi4_data->hw_if->board_data->fw_name)
-			image_name = rmi4_data->hw_if->board_data->fw_name;
-		else
-			image_name = FW_IMAGE_NAME;
-
 		retval = secure_memcpy(fwu->image_name, MAX_IMAGE_NAME_LEN,
-				image_name, strlen(image_name),
-				strlen(image_name));
+				FW_IMAGE_NAME, sizeof(FW_IMAGE_NAME),
+				sizeof(FW_IMAGE_NAME));
 		if (retval < 0) {
 			dev_err(rmi4_data->pdev->dev.parent,
 					"%s: Failed to copy image file name\n",

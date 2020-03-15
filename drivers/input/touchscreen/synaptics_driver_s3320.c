@@ -1,3 +1,17 @@
+/************************************************************************************
+ ** File: - /android/kernel/drivers/input/touchscreen/synaptic_s3320.c
+ ** Copyright (C), 2008-2012, OEM Mobile Comm Corp., Ltd
+ **
+ ** Description:
+ **      touch panel driver for synaptics
+ **      can change MAX_POINT_NUM value to support multipoint
+ ** Version: 1.0
+ ** Date created: 10:49:46,18/01/2012
+ ** Author: Yixue.Ge@BasicDrv.TP
+ **
+ ** --------------------------- Revision History: --------------------------------
+ ** 	<author>	<data>			<desc>
+ ************************************************************************************/
 #include <linux/of_gpio.h>
 #include <linux/irq.h>
 #include <linux/i2c.h>
@@ -10,6 +24,7 @@
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
 #include <linux/hrtimer.h>
+#include <linux/pm_qos.h>
 #include <linux/proc_fs.h>
 #include <linux/interrupt.h>
 #include <linux/regulator/consumer.h>
@@ -52,6 +67,9 @@
 #include "synaptics_dsx_core.h"
 #include <linux/oneplus/boot_mode.h>
 #include <linux/pm_qos.h>
+
+#include <linux/moduleparam.h>
+
 /*------------------------------------------------Global Define--------------------------------------------*/
 
 #define TP_UNKNOWN 0
@@ -144,7 +162,19 @@ struct pm_qos_request pm_qos_req_tp;
 #define Sgestrue            14  // S
 #define SingleTap           15  // single tap
 
-//ruanbanmao@BSP add for tp gesture 2015-05-06, begin
+
+#ifdef VENDOR_EDIT_OXYGEN
+#define KEY_GESTURE_W          	246 //w
+#define KEY_GESTURE_M      		247 //m
+#define KEY_GESTURE_S			248 //s
+#define KEY_DOUBLE_TAP          249 // double tap to wake
+#define KEY_GESTURE_CIRCLE      250 // draw circle to lunch camera
+#define KEY_GESTURE_TWO_SWIPE	251 // swipe two finger vertically to play/pause
+#define KEY_GESTURE_V           252 // draw v to toggle flashlight
+#define KEY_GESTURE_LEFT_V      253 // draw left arrow for previous track
+#define KEY_GESTURE_RIGHT_V     254 // draw right arrow for next track
+#endif
+
 #define BIT0 (0x1 << 0)
 #define BIT1 (0x1 << 1)
 #define BIT2 (0x1 << 2)
@@ -173,8 +203,12 @@ int Sgestrue_gesture =0;//"(S)"
 int Single_gesture = 0; //"(SingleTap)"
 int Enable_gesture =0;
 static int gesture_switch = 0;
-//ruanbanmao@BSP add for tp gesture 2015-05-06, end
 #endif
+
+bool haptic_feedback_disable = false;
+module_param(haptic_feedback_disable, bool, 0644);
+
+void qpnp_hap_ignore_next_request(void);
 
 /*********************for Debug LOG switch*******************/
 #define TPD_ERR(a, arg...)  pr_err(TPD_DEVICE ": " a, ##arg)
@@ -398,7 +432,6 @@ static const struct dev_pm_ops synaptic_pm_ops = {
 #endif
 };
 
-//add by jiachenghui for boot time optimize 2015-5-13
 static int probe_ret;
 struct synaptics_optimize_data{
 	struct delayed_work work;
@@ -424,21 +457,17 @@ static int oem_synaptics_ts_probe(struct i2c_client *client, const struct i2c_de
 	INIT_DELAYED_WORK(&(optimize_data.work), synaptics_ts_probe_func);
 	TPD_ERR("before on cpu [%d]\n",smp_processor_id());
 
-	//add by lifeng@bsp 2015-12-10 for only one cpu on line
 	for (i = 0; i < NR_CPUS; i++){
          TPD_ERR("check CPU[%d] is [%s]\n",i,cpu_is_offline(i)?"offline":"online");
 		 if (cpu_online(i) && (i != smp_processor_id()))
             break;
     }
     queue_delayed_work_on(i != NR_CPUS?i:0,optimize_data.workqueue,&(optimize_data.work),msecs_to_jiffies(300));
-    //end add by lifeng@bsp 2015-12-10 for only one cpu on line
 
 	return probe_ret;
 }
-//end add by jiachenghui for boot time optimize 2015-5-13
 
 static struct i2c_driver tpd_i2c_driver = {
-//add by jiachenghui for boot time optimize 2015-5-13
 	.probe		= oem_synaptics_ts_probe,
 	.remove		= synaptics_ts_remove,
 	.id_table	= synaptics_ts_id,
@@ -530,6 +559,8 @@ struct synaptics_ts_data {
 	unsigned int fp_aod_cnt;
 	unsigned int unlock_succes;
 	int project_version;
+
+	struct pm_qos_request pm_qos_req;
 };
 
 static struct device_attribute attrs_oem[] = {
@@ -784,7 +815,6 @@ static int synaptics_enable_interrupt_for_gesture(struct synaptics_ts_data *ts, 
 {
 	int ret;
 	unsigned char reportbuf[4];
-	//chenggang.li@BSP.TP modified for gesture
 	TPD_DEBUG("%s is called\n", __func__);
 	ret = synaptics_rmi4_i2c_write_byte(ts->client, 0xff, 0x0);
 	if( ret < 0 ) {
@@ -1132,7 +1162,6 @@ static int synaptics_rmi4_i2c_write_word(struct i2c_client* client,
 	return retval;
 }
 
-//chenggang.li@BSP.TP modified for oem 2014-08-05 gesture_judge
 /***************start****************/
 #ifdef SUPPORT_GESTURE
 static void synaptics_get_coordinate_point(struct synaptics_ts_data *ts)
@@ -1479,10 +1508,50 @@ static void gesture_judge(struct synaptics_ts_data *ts)
 				(gesture_buffer[2] == 0x73) ? Sgestrue :
 				UnkownGestrue;
 			break;
+			//#endif, ruanbanmao@bsp 2015-05-06, end.
 		default:
 			gesture = UnkownGestrue;
 			break;
 		}
+
+#ifdef VENDOR_EDIT_OXYGEN
+	keyCode = UnkownGestrue;
+	// Get key code based on registered gesture.
+	switch (gesture) {
+		case DouTap:
+			keyCode = KEY_DOUBLE_TAP;
+			break;
+		case UpVee:
+			keyCode = KEY_GESTURE_V;
+			break;
+		case DownVee:
+			keyCode = KEY_GESTURE_V;
+			break;
+		case LeftVee:
+			keyCode = KEY_GESTURE_RIGHT_V;
+			break;
+		case RightVee:
+			keyCode = KEY_GESTURE_LEFT_V;
+			break;
+		case Circle:
+			keyCode = KEY_GESTURE_CIRCLE;
+			break;
+		case DouSwip:
+			keyCode = KEY_GESTURE_TWO_SWIPE;
+			break;
+		case Wgestrue:
+			keyCode = KEY_GESTURE_W;
+			break;
+		case Mgestrue:
+			keyCode = KEY_GESTURE_M;
+			break;
+		case Sgestrue:
+			keyCode = KEY_GESTURE_S;
+			break;
+		default:
+			break;
+	}
+#endif
 
 	TPD_ERR("detect %s gesture\n", gesture == DouTap ? "(double tap)" :
 			gesture == UpVee ? "(V)" :
@@ -1513,8 +1582,10 @@ static void gesture_judge(struct synaptics_ts_data *ts)
 		input_sync(ts->input_dev);
 		input_report_key(ts->input_dev, keyCode, 0);
 		input_sync(ts->input_dev);
-	}else{
 
+		if (haptic_feedback_disable)
+			qpnp_hap_ignore_next_request();
+	}else{
 		ret = i2c_smbus_read_i2c_block_data( ts->client, F12_2D_CTRL20, 3, &(reportbuf[0x0]) );
 		ret = reportbuf[2] & 0x20;
 		if(ret == 0)
@@ -1523,7 +1594,7 @@ static void gesture_judge(struct synaptics_ts_data *ts)
 		if (ret < 0)
 			TPD_ERR("%s :Failed to write report buffer\n", __func__);
 	}
-    TPD_DEBUG("%s end!\n",__func__);
+	TPD_DEBUG("%s end!\n", __func__);
 }
 #endif
 /***************end****************/
@@ -1538,6 +1609,7 @@ bool key_appselect_pressed = 0;
 bool key_home_pressed =0;
 extern bool virtual_key_enable;
 #endif
+
 void int_touch(void)
 {
 	int ret = -1,i = 0;
@@ -1686,6 +1758,7 @@ void int_touch(void)
 			//#ifdef REPORT_2D_W
 			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, max(points.raw_x, points.raw_y));
 			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MINOR, min(points.raw_x, points.raw_y));
+			//#endif
 #ifdef REPORT_2D_PRESSURE
             if (ts->support_ft){
                 input_report_abs(ts->input_dev,ABS_MT_PRESSURE,pres_value);
@@ -1837,7 +1910,7 @@ static void synaptics_ts_work_func(struct work_struct *work)
 	uint8_t status = 0;
 	uint8_t inte = 0;
 
-    	struct synaptics_ts_data *ts = ts_g;
+	struct synaptics_ts_data *ts = ts_g;
 
 	pm_qos_add_request(&pm_qos_req_tp, PM_QOS_CPU_DMA_LATENCY,
 				PM_QOS_VALUE_TP);
@@ -1850,6 +1923,10 @@ static void synaptics_ts_work_func(struct work_struct *work)
 	if( ts->enable_remote) {
 		goto END;
 	}
+
+	/* prevent CPU from entering deep sleep */
+	pm_qos_update_request(&ts->pm_qos_req, 100);
+
 	ret = synaptics_rmi4_i2c_write_byte(ts->client, 0xff, 0x00 );
 	ret = synaptics_rmi4_i2c_read_word(ts->client, F01_RMI_DATA_BASE);
 
@@ -1921,6 +1998,8 @@ static void synaptics_ts_work_func(struct work_struct *work)
 
 
 END:
+	pm_qos_update_request(&ts->pm_qos_req, PM_QOS_DEFAULT_VALUE);
+
 	//ret = set_changer_bit(ts);
 	touch_enable(ts);
 EXIT:
@@ -1950,7 +2029,6 @@ static irqreturn_t synaptics_irq_thread_fn(int irq, void *dev_id)
 }
 #endif
 
-//wangwenxue@BSP add for change baseline_test to "proc\touchpanel\baseline_test"  begin
 static ssize_t tp_baseline_test_read_func(struct file *file, char __user *user_buf, size_t count, loff_t *ppos)
 {
 	char page[PAGESIZE];
@@ -1965,7 +2043,6 @@ static ssize_t tp_baseline_test_read_func(struct file *file, char __user *user_b
 	}
 	return baseline_ret;
 }
-//wangwenxue@BSP add for change baseline_test to "proc\touchpanel\baseline_test"  end
 
 static ssize_t i2c_device_test_read_func(struct file *file, char __user *user_buf, size_t count, loff_t *ppos)
 {
@@ -2006,7 +2083,6 @@ static ssize_t tp_gesture_write_func(struct file *file, const char __user *buffe
 		TPD_ERR(KERN_INFO "%s: read proc input error.\n", __func__);
 		return count;
 	}
-	//ruanbanmao@BSP add for tp gesture 2015-05-06, begin
 	TPD_ERR("%s write argc1[0x%x],argc2[0x%x]\n",__func__,buf[0],buf[1]);
 
 	UpVee_gesture = (buf[0] & BIT0)?1:0; //"V"
@@ -2033,7 +2109,6 @@ static ssize_t tp_gesture_write_func(struct file *file, const char __user *buffe
 	{
 		ts->gesture_enable = 0;
 	}
-    //ruanbanmao@BSP add for tp gesture 2015-05-06, end
 	return count;
 }
 static ssize_t coordinate_proc_read_func(struct file *file, char __user *user_buf, size_t count, loff_t *ppos)
@@ -2105,7 +2180,6 @@ static ssize_t gesture_switch_write_func(struct file *file, const char __user *p
 	return count;
 }
 
-// chenggang.li@BSP.TP modified for oem 2014-08-08 create node
 /******************************start****************************/
 static const struct file_operations tp_gesture_proc_fops = {
 	.write = tp_gesture_write_func,
@@ -2478,14 +2552,12 @@ static ssize_t tp_baseline_show(struct device_driver *ddri, char *buf)
 	synaptics_glove_mode_enable(ts);
 #endif
 	synaptics_init_panel(ts);
-//modify by zhouwenping for solve cat tp_baseline_image node cause touch disable 20160225 start
 	synaptics_enable_interrupt(ts,1);
 	ret = synaptics_soft_reset(ts);
 	if (ret < 0){
            TPD_ERR("%s faile to reset device\n",__func__);
         }
 	mutex_unlock(&ts->mutex);
-//modify by zhouwenping 20160225 end
 	return num_read_chars;
 
 }
@@ -3539,6 +3611,14 @@ static int	synaptics_input_init(struct synaptics_ts_data *ts)
 	set_bit(BTN_TOOL_FINGER, ts->input_dev->keybit);
 #ifdef SUPPORT_GESTURE
 	set_bit(KEY_F4 , ts->input_dev->keybit);//doulbe-tap resume
+#ifdef VENDOR_EDIT_OXYGEN
+	set_bit(KEY_DOUBLE_TAP, ts->input_dev->keybit);
+	set_bit(KEY_GESTURE_CIRCLE, ts->input_dev->keybit);
+	set_bit(KEY_GESTURE_V, ts->input_dev->keybit);
+	set_bit(KEY_GESTURE_TWO_SWIPE, ts->input_dev->keybit);
+	set_bit(KEY_GESTURE_LEFT_V, ts->input_dev->keybit);
+	set_bit(KEY_GESTURE_RIGHT_V, ts->input_dev->keybit);
+#endif
 	set_bit(KEY_APPSELECT, ts->input_dev->keybit);
 	set_bit(KEY_BACK, ts->input_dev->keybit);
 #endif
@@ -3750,7 +3830,6 @@ static ssize_t synaptics_update_fw_store(struct device *dev,
 	struct synaptics_ts_data *ts = dev_get_drvdata(dev);
 	unsigned long val;
 	int rc;
-
 	int bootmode;
 
 	bootmode = get_boot_mode();
@@ -4217,7 +4296,6 @@ static ssize_t tp_reset_write_func (struct file *file, const char *buffer, size_
 	return count;
 }
 
-//chenggang.li@bsp add for 14045
 static const struct file_operations base_register_address= {
 	.write = synap_write_address,
 	.read =  synap_read_address,
@@ -4226,20 +4304,17 @@ static const struct file_operations base_register_address= {
 };
 
 
-//wangwenxue@BSP add for change baseline_test to "proc\touchpanel\baseline_test"  begin
 static const struct file_operations i2c_device_test_fops = {
 	.read =  i2c_device_test_read_func,
 	.open = simple_open,
 	.owner = THIS_MODULE,
 };
 
-//wangwenxue@BSP add for change baseline_test to "proc\touchpanel\baseline_test"  begin
 static const struct file_operations tp_baseline_test_proc_fops = {
 	.read =  tp_baseline_test_read_func,
 	.open = simple_open,
 	.owner = THIS_MODULE,
 };
-//wangwenxue@BSP add for change baseline_test to "proc\touchpanel\baseline_test"  end
 
 #ifdef SUPPORT_GLOVES_MODE
 static const struct file_operations glove_mode_enable_proc_fops = {
@@ -4666,7 +4741,7 @@ static ssize_t key_switch_read_func(struct file *file, char __user *user_buf, si
 	TPD_ERR("%s left:%s right:%s\n", __func__,
 		    key_switch?"key_back":"key_appselect",
 		    key_switch?"key_appselect":"key_back");
-	ret = snprintf(page, PAGESIZE, "key_switch left:%s right:%s\n",
+	ret = snprintf(page, PAGE_SIZE, "key_switch left:%s right:%s\n",
 		    key_switch?"key_back":"key_appselect",
 		    key_switch?"key_appselect":"key_back");
 	ret = simple_read_from_buffer(user_buf, count, ppos, page, strlen(page));
@@ -4808,14 +4883,11 @@ static int init_synaptics_proc(void)
 	}
 #endif
 
-	//wangwenxue@BSP add for change baseline_test to "proc\touchpanel\baseline_test"  begin
 	prEntry_tmp = proc_create( "baseline_test", 0666, prEntry_tp, &tp_baseline_test_proc_fops);
 	if(prEntry_tmp == NULL){
 		ret = -ENOMEM;
         TPD_ERR("Couldn't create baseline_test\n");
 	}
-	//wangwenxue@BSP add for change baseline_test to "proc\touchpanel\baseline_test"  end
-	//wangwenxue@BSP add for change baseline_test to "proc\touchpanel\i2c_device_test"  begin
 	prEntry_tmp = proc_create( "i2c_device_test", 0666, prEntry_tp, &i2c_device_test_fops);
 	if(prEntry_tmp == NULL){
 		ret = -ENOMEM;
@@ -6036,6 +6108,10 @@ static int synaptics_ts_probe(struct i2c_client *client, const struct i2c_device
 	}
 #endif
 	init_synaptics_proc();
+
+	pm_qos_add_request(&ts->pm_qos_req, PM_QOS_CPU_DMA_LATENCY,
+		PM_QOS_DEFAULT_VALUE);
+
 	TPDTM_DMESG("synaptics_ts_probe 3203: normal end\n");
 
 	bootmode = get_boot_mode();
@@ -6107,6 +6183,9 @@ static int synaptics_ts_remove(struct i2c_client *client)
 	input_free_device(ts->input_dev);
 	kfree(ts);
 	tpd_power(ts,0);
+
+	pm_qos_remove_request(&ts->pm_qos_req);
+
 	return 0;
 }
 
@@ -6257,6 +6336,7 @@ static int synaptics_i2c_suspend(struct device *dev)
 					ts->pinctrl_state_suspend);
 		}
 	}
+//#endif
 	return 0;
 }
 

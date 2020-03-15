@@ -773,8 +773,7 @@ int32_t cam_sensor_update_power_settings(void *cmd_buf,
 				sizeof(struct cam_cmd_unconditional_wait);
 			if (tot_size > cmd_length) {
 				CAM_ERR(CAM_SENSOR, "Command Buffer is wrong");
-				rc = -EINVAL;
-				goto free_power_down_settings;
+				return -EINVAL;
 			}
 			scr = (void *) (wait_cmd);
 			ptr = (void *)

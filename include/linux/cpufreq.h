@@ -417,7 +417,6 @@ static inline void cpufreq_resume(void) {}
 #define CPUFREQ_CREATE_POLICY		(3)
 #define CPUFREQ_REMOVE_POLICY		(4)
 #define CPUFREQ_STOP			(5)
-#define CPUFREQ_INCOMPATIBLE		(6)
 
 /* Govinfo Notifiers */
 #define CPUFREQ_LOAD_CHANGE		(0)
@@ -548,19 +547,6 @@ static inline void cpufreq_policy_apply_limits(struct cpufreq_policy *policy)
 		__cpufreq_driver_target(policy, policy->min, CPUFREQ_RELATION_L);
 }
 
-static inline unsigned int
-cpufreq_policy_apply_limits_fast(struct cpufreq_policy *policy)
-{
-	unsigned int ret = 0;
-
-	if (policy->max < policy->cur)
-		ret = cpufreq_driver_fast_switch(policy, policy->max);
-	else if (policy->min > policy->cur)
-		ret = cpufreq_driver_fast_switch(policy, policy->min);
-
-	return ret;
-}
-
 /* Governor attribute set */
 struct gov_attr_set {
 	struct kobject kobj;
@@ -611,9 +597,6 @@ extern struct cpufreq_governor cpufreq_gov_interactive;
 #elif defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHED)
 extern struct cpufreq_governor cpufreq_gov_sched;
 #define CPUFREQ_DEFAULT_GOVERNOR	(&cpufreq_gov_sched)
-#elif defined(CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDHORIZON)
-extern struct cpufreq_governor cpufreq_gov_schedhorizon;
-#define CPUFREQ_DEFAULT_GOVERNOR	(&cpufreq_gov_schedhorizon)
 #endif
 
 /*********************************************************************

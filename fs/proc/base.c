@@ -89,6 +89,9 @@
 #include <linux/posix-timers.h>
 #include <linux/cpufreq_times.h>
 
+#include <linux/hotcount.h>
+#include <linux/rmap.h>
+
 #include <linux/adj_chain.h>
 
 #ifdef CONFIG_HARDWALL
@@ -1208,9 +1211,6 @@ static ssize_t oom_score_adj_write(struct file *file, const char __user *buf,
 		goto err_unlock;
 	}
 
-	/* CONFIG_MEMPLUS add start by bin.zhong@ATSI */
-	memplus_state_check(false, oom_score_adj, task, 0, 0);
-	/* add end */
 	task->signal->oom_score_adj = (short)oom_score_adj;
 
 	adj_chain_update_oom_score_adj(task);
@@ -1776,66 +1776,6 @@ static int proc_exe_link(struct dentry *dentry, struct path *exe_path)
 	} else
 		return -ENOENT;
 }
-
-
-static ssize_t inode_index_disabled_read(struct file *file, char __user *buf,
-				size_t count, loff_t *ppos)
-{
-	struct task_struct *task = get_proc_task(file_inode(file));
-	char buffer[PROC_NUMBUF];
-	size_t len;
-	int page_hot_count;
-
-	if (!task)
-		return -ESRCH;
-
-	page_hot_count = task->inode_index_disabled;
-
-	put_task_struct(task);
-
-	len = snprintf(buffer, sizeof(buffer), "%d\n", page_hot_count);
-	return simple_read_from_buffer(buf, count, ppos, buffer, len);
-}
-
-static ssize_t inode_index_disabled_write(struct file *file,
-	const char __user *buf, size_t count, loff_t *ppos)
-{
-	struct task_struct *task;
-	char buffer[PROC_NUMBUF];
-	int inode_index_disabled;
-	int err;
-
-	memset(buffer, 0, sizeof(buffer));
-
-	if (count > sizeof(buffer) - 1)
-		count = sizeof(buffer) - 1;
-	if (copy_from_user(buffer, buf, count)) {
-		err = -EFAULT;
-		goto out;
-	}
-
-	err = kstrtoint(strstrip(buffer), 0, &inode_index_disabled);
-	if (err)
-		goto out;
-
-	task = get_proc_task(file_inode(file));
-	if (!task) {
-		err = -ESRCH;
-		goto out;
-	}
-
-	task->inode_index_disabled = inode_index_disabled;
-
-	put_task_struct(task);
-
-out:
-	return err < 0 ? err : count;
-}
-
-static const struct file_operations proc_inode_index_disabled_operations = {
-	.read		= inode_index_disabled_read,
-	.write		= inode_index_disabled_write,
-};
 
 static const char *proc_pid_get_link(struct dentry *dentry,
 				     struct inode *inode,
@@ -2640,6 +2580,107 @@ static const struct file_operations proc_pid_set_timerslack_ns_operations = {
 	.release	= single_release,
 };
 
+static ssize_t page_hot_count_read(struct file *file, char __user *buf,
+				size_t count, loff_t *ppos)
+{
+	struct task_struct *task = get_proc_task(file_inode(file));
+	char buffer[PROC_NUMBUF];
+	size_t len;
+	int page_hot_count;
+
+	if (!task)
+		return -ESRCH;
+
+	page_hot_count = task->hot_count;
+
+	put_task_struct(task);
+
+	len = snprintf(buffer, sizeof(buffer), "%d\n", page_hot_count);
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static struct cgroup_subsys_state *
+task_get_css_noretry(struct task_struct *task, int subsys_id)
+{
+	struct cgroup_subsys_state *css;
+
+	rcu_read_lock();
+	css = task_css(task, subsys_id);
+	if (unlikely(!css_tryget_online(css))) {
+		rcu_read_unlock();
+		return NULL;
+	}
+	rcu_read_unlock();
+	return css;
+}
+
+static ssize_t page_hot_count_write(struct file *file, const char __user *buf,
+				size_t count, loff_t *ppos)
+{
+	struct task_struct *task;
+	char buffer[PROC_NUMBUF];
+	int page_hot_count;
+	int err;
+	uid_t uid;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+	if (copy_from_user(buffer, buf, count)) {
+		err = -EFAULT;
+		goto out;
+	}
+
+	err = kstrtoint(strstrip(buffer), 0, &page_hot_count);
+	if (err)
+		goto out;
+
+	task = get_proc_task(file_inode(file));
+	if (!task) {
+		err = -ESRCH;
+		goto out;
+	}
+
+	task->hot_count = page_hot_count;
+	uid = __task_cred(task)->user->uid.val;
+
+	if (!page_hot_count) {
+		struct cgroup_subsys_state *pos;
+		struct css_task_iter it;
+		struct task_struct *tsk;
+		struct cgroup_subsys_state *parent;
+		struct cgroup_subsys_state * css;
+
+		css = task_get_css_noretry(task, cpuacct_cgrp_id);
+		if (css) {
+			parent = css->parent;
+			rcu_read_lock();
+			css_for_each_child(pos, parent) {
+				css_task_iter_start(&pos->cgroup->self, &it);
+				while ((tsk = css_task_iter_next(&it)))
+					tsk->hot_count = 0;
+				css_task_iter_end(&it);
+			}
+			rcu_read_unlock();
+		}
+		reclaim_pages_from_uid_list(uid);
+		delete_prio_node(uid);
+	} else {
+		insert_prio_node(page_hot_count, uid);
+	}
+
+	put_task_struct(task);
+
+out:
+	return err < 0 ? err : count;
+}
+
+static const struct file_operations proc_page_hot_count_operations = {
+	.read		= page_hot_count_read,
+	.write		= page_hot_count_write,
+};
+
 static int proc_pident_instantiate(struct inode *dir,
 	struct dentry *dentry, struct task_struct *task, const void *ptr)
 {
@@ -3162,155 +3203,6 @@ static int proc_pid_personality(struct seq_file *m, struct pid_namespace *ns,
 	return err;
 }
 
-#ifdef CONFIG_MEMPLUS
-static ssize_t
-memplus_type_write(struct file *file, const char __user *buf,
-	size_t count, loff_t *offset)
-{
-	struct inode *inode = file_inode(file);
-	struct task_struct *p;
-	char buffer[PROC_NUMBUF];
-	int type_id, err;
-
-	memset(buffer, 0, sizeof(buffer));
-	if (count > sizeof(buffer) - 1)
-		count = sizeof(buffer) - 1;
-	if (copy_from_user(buffer, buf, count)) {
-		err = -EFAULT;
-		goto out;
-	}
-
-	err = kstrtoint(strstrip(buffer), 0, &type_id);
-	if (err)
-		goto out;
-
-	p = get_proc_task(inode);
-	if (!p)
-		return -ESRCH;
-
-	memplus_state_check(false, 0, p, type_id, 1);
-
-	put_task_struct(p);
-
-out:
-	return err < 0 ? err : count;
-}
-
-static int memplus_type_show(struct seq_file *m, void *v)
-{
-	struct inode *inode = m->private;
-	struct task_struct *p;
-
-	p = get_proc_task(inode);
-	if (!p)
-		return -ESRCH;
-
-	seq_printf(m, "%d\n", p->signal->memplus_type);
-
-	put_task_struct(p);
-
-	return 0;
-}
-
-static int memplus_type_open(struct inode *inode, struct file *filp)
-{
-	return single_open(filp, memplus_type_show, inode);
-}
-
-static const struct file_operations proc_pid_memplus_type_operations = {
-	.open           = memplus_type_open,
-	.read           = seq_read,
-	.write          = memplus_type_write,
-	.llseek         = seq_lseek,
-	.release        = single_release,
-};
-#endif
-
-
-#include <linux/random.h>
-static int va_feature = 0x7;
-module_param(va_feature, int, 0644);
-static ssize_t proc_va_feature_read(struct file *file, char __user *buf,
-		size_t count, loff_t *ppos)
-{
-	struct task_struct *task;
-	struct mm_struct *mm;
-	char buffer[32];
-	int ret;
-
-	if (!test_thread_flag(TIF_32BIT))
-		return -EINVAL;
-
-	task = get_proc_task(file_inode(file));
-	if (!task)
-		return -ESRCH;
-
-	ret = -EINVAL;
-	mm = get_task_mm(task);
-	if (mm) {
-		if (mm->va_feature & 0x4) {
-			ret = snprintf(buffer, sizeof(buffer), "%d\n",
-					(mm->zygoteheap_in_MB > 256) ? mm->zygoteheap_in_MB : 256);
-			if (ret > 0)
-				ret = simple_read_from_buffer(buf, count, ppos,
-						buffer, ret);
-		}
-		mmput(mm);
-	}
-
-	put_task_struct(task);
-
-	return ret;
-}
-
-static ssize_t proc_va_feature_write(struct file *file, const char __user *buf,
-		size_t count, loff_t *ppos)
-{
-	struct task_struct *task;
-	struct mm_struct *mm;
-	int ret;
-	unsigned int heapsize;
-
-	if (!test_thread_flag(TIF_32BIT))
-		return -ENOTTY;
-
-	task = get_proc_task(file_inode(file));
-	if (!task)
-		return -ESRCH;
-
-	ret = kstrtouint_from_user(buf, count, 0, &heapsize);
-	if (ret) {
-		put_task_struct(task);
-		return ret;
-	}
-
-	mm = get_task_mm(task);
-	if (mm) {
-		mm->va_feature = va_feature;
-
-		/* useless to print comm, always "main" */
-		if (mm->va_feature & 0x1) {
-			mm->va_feature_rnd = (0x4900000 + (get_random_long() % 0x1e00000)) & ~(0xffff);
-			special_arch_pick_mmap_layout(mm);
-		}
-
-		if ((mm->va_feature & 0x4) && (mm->zygoteheap_in_MB == 0))
-			mm->zygoteheap_in_MB = heapsize;
-
-		mmput(mm);
-	}
-
-	put_task_struct(task);
-
-	return count;
-}
-
-static const struct file_operations proc_va_feature_operations = {
-	.read           = proc_va_feature_read,
-	.write          = proc_va_feature_write,
-};
-
-
 /*
  * Thread groups
  */
@@ -3368,7 +3260,6 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_PROC_PAGE_MONITOR
 	REG("clear_refs", S_IWUSR, proc_clear_refs_operations),
 	REG("smaps",      S_IRUGO, proc_pid_smaps_operations),
-	REG("smaps_rollup", S_IRUGO, proc_pid_smaps_rollup_operations),
 	REG("pagemap",    S_IRUSR, proc_pagemap_operations),
 #endif
 #ifdef CONFIG_SECURITY
@@ -3425,17 +3316,10 @@ static const struct pid_entry tgid_base_stuff[] = {
 	REG("timers",	  S_IRUGO, proc_timers_operations),
 #endif
 	REG("timerslack_ns", S_IRUGO|S_IWUGO, proc_pid_set_timerslack_ns_operations),
+	REG("page_hot_count", 0666, proc_page_hot_count_operations),
 #ifdef CONFIG_CPU_FREQ_TIMES
 	ONE("time_in_state", 0444, proc_time_in_state_show),
 #endif
-#ifdef CONFIG_MEMPLUS
-	REG("memplus_type", 0666,
-		proc_pid_memplus_type_operations),
-#endif
-#ifdef CONFIG_SMART_BOOST
-	REG("page_hot_count", 0666, proc_page_hot_count_operations),
-#endif
-	REG("va_feature", 0666, proc_va_feature_operations),
 };
 
 static int proc_tgid_base_readdir(struct file *file, struct dir_context *ctx)
@@ -3775,7 +3659,6 @@ static const struct pid_entry tid_base_stuff[] = {
 #ifdef CONFIG_PROC_PAGE_MONITOR
 	REG("clear_refs", S_IWUSR, proc_clear_refs_operations),
 	REG("smaps",     S_IRUGO, proc_tid_smaps_operations),
-	REG("smaps_rollup", S_IRUGO, proc_pid_smaps_rollup_operations),
 	REG("pagemap",    S_IRUSR, proc_pagemap_operations),
 #endif
 #ifdef CONFIG_SECURITY

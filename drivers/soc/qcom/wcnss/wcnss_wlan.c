@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1317,7 +1317,7 @@ static void wcnss_smd_notify_event(void *data, unsigned int event)
 		schedule_work(&penv->wcnssctrl_version_work);
 		schedule_work(&penv->wcnss_pm_config_work);
 		cancel_delayed_work(&penv->wcnss_pm_qos_del_req);
-		queue_delayed_work(system_power_efficient_wq, &penv->wcnss_pm_qos_del_req, 0);
+		schedule_delayed_work(&penv->wcnss_pm_qos_del_req, 0);
 		if (penv->wlan_config.is_pronto_vadc && (penv->vadc_dev))
 			schedule_work(&penv->wcnss_vadc_work);
 		break;
@@ -2000,7 +2000,7 @@ static void wcnss_notify_vbat(enum qpnp_tm_state state, void *ctx)
 	if (rc)
 		wcnss_log(ERR, "%s: tm setup failed: %d\n", __func__, rc);
 	else
-		queue_delayed_work(system_power_efficient_wq, &penv->vbatt_work,
+		schedule_delayed_work(&penv->vbatt_work,
 				      msecs_to_jiffies(2000));
 
 	mutex_unlock(&penv->vbat_monitor_mutex);
@@ -2229,8 +2229,9 @@ unlock_exit:
 	wcnss_send_cal_rsp(fw_status);
 }
 
-static void wcnss_process_smd_msg(int len)
+static void wcnssctrl_rx_handler(struct work_struct *worker)
 {
+	int len = 0;
 	int rc = 0;
 	unsigned char buf[sizeof(struct wcnss_version)];
 	unsigned char build[WCNSS_MAX_BUILD_VER_LEN + 1];
@@ -2239,6 +2240,17 @@ static void wcnss_process_smd_msg(int len)
 	struct wcnss_version *pversion;
 	int hw_type;
 	unsigned char fw_status = 0;
+
+	len = smd_read_avail(penv->smd_ch);
+	if (len > WCNSS_MAX_FRAME_SIZE) {
+		wcnss_log(ERR, "frame larger than the allowed size\n");
+		smd_read(penv->smd_ch, NULL, len);
+		return;
+	}
+	if (len < sizeof(struct smd_msg_hdr)) {
+		wcnss_log(DBG, "incomplete header available len = %d\n", len);
+		return;
+	}
 
 	rc = smd_read(penv->smd_ch, buf, sizeof(struct smd_msg_hdr));
 	if (rc < sizeof(struct smd_msg_hdr)) {
@@ -2347,33 +2359,6 @@ static void wcnss_process_smd_msg(int len)
 
 	default:
 		wcnss_log(ERR, "invalid message type %d\n", phdr->msg_type);
-	}
-}
-
-static void wcnssctrl_rx_handler(struct work_struct *worker)
-{
-	int len;
-
-	while (1) {
-		len = smd_read_avail(penv->smd_ch);
-		if (len == 0) {
-			pr_debug("wcnss: No more data to be read\n");
-			return;
-		}
-
-		if (len > WCNSS_MAX_FRAME_SIZE) {
-			pr_err("wcnss: frame larger than the allowed size\n");
-			smd_read(penv->smd_ch, NULL, len);
-			return;
-		}
-
-		if (len < sizeof(struct smd_msg_hdr)) {
-			pr_err("wcnss: incomplete header available len = %d\n",
-			       len);
-			return;
-	}
-
-		wcnss_process_smd_msg(len);
 	}
 }
 
@@ -3454,7 +3439,7 @@ static int wcnss_notif_cb(struct notifier_block *this, unsigned long code,
 	} else if ((code == SUBSYS_BEFORE_SHUTDOWN && data && data->crashed) ||
 			code == SUBSYS_SOC_RESET) {
 		wcnss_disable_pc_add_req();
-		queue_delayed_work(system_power_efficient_wq, &penv->wcnss_pm_qos_del_req,
+		schedule_delayed_work(&penv->wcnss_pm_qos_del_req,
 				      msecs_to_jiffies(WCNSS_PM_QOS_TIMEOUT));
 		penv->is_shutdown = 1;
 		wcnss_log_debug_regs_on_bite();
@@ -3466,7 +3451,7 @@ static int wcnss_notif_cb(struct notifier_block *this, unsigned long code,
 		wcnss_disable_pc_remove_req();
 	} else if (code == SUBSYS_BEFORE_SHUTDOWN) {
 		wcnss_disable_pc_add_req();
-		queue_delayed_work(system_power_efficient_wq, &penv->wcnss_pm_qos_del_req,
+		schedule_delayed_work(&penv->wcnss_pm_qos_del_req,
 				      msecs_to_jiffies(WCNSS_PM_QOS_TIMEOUT));
 		penv->is_shutdown = 1;
 	} else if (code == SUBSYS_AFTER_POWERUP) {

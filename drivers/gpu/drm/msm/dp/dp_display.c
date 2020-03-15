@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -86,7 +86,7 @@ struct dp_display_private {
 
 	struct workqueue_struct *wq;
 	struct delayed_work hdcp_cb_work;
-	struct work_struct connect_work;
+	struct delayed_work connect_work;
 	struct work_struct attention_work;
 	struct mutex hdcp_mutex;
 	struct mutex session_lock;
@@ -262,7 +262,8 @@ static void dp_display_deinitialize_hdcp(struct dp_display_private *dp)
 
 	sde_dp_hdcp2p2_deinit(dp->hdcp.data);
 	dp_display_destroy_hdcp_workqueue(dp);
-	mutex_destroy(&dp->hdcp_mutex);
+	if (&dp->hdcp_mutex)
+		mutex_destroy(&dp->hdcp_mutex);
 }
 
 static int dp_display_initialize_hdcp(struct dp_display_private *dp)
@@ -455,7 +456,7 @@ static void dp_display_post_open(struct dp_display *dp_display)
 
 	/* if cable is already connected, send notification */
 	if (dp->usbpd->hpd_high)
-		queue_work(dp->wq, &dp->connect_work);
+		queue_delayed_work(dp->wq, &dp->connect_work, HZ * 10);
 	else
 		dp_display->post_open = NULL;
 }
@@ -463,12 +464,15 @@ static void dp_display_post_open(struct dp_display *dp_display)
 static int dp_display_send_hpd_notification(struct dp_display_private *dp,
 		bool hpd)
 {
+	u32 timeout_sec;
 	int ret = 0;
 
 	dp->dp_display.is_connected = hpd;
 
-	if (!dp_display_framework_ready(dp))
-		return ret;
+	if  (dp_display_framework_ready(dp))
+		timeout_sec = 5;
+	else
+		timeout_sec = 10;
 
 	dp->aux->state |= DP_STATE_NOTIFICATION_SENT;
 
@@ -476,7 +480,7 @@ static int dp_display_send_hpd_notification(struct dp_display_private *dp,
 	dp_display_send_hpd_event(dp);
 
 	if (!wait_for_completion_timeout(&dp->notification_comp,
-						HZ * 5)) {
+						HZ * timeout_sec)) {
 		pr_warn("%s timeout\n", hpd ? "connect" : "disconnect");
 		ret = -EINVAL;
 	}
@@ -610,9 +614,9 @@ static int dp_display_usbpd_configure_cb(struct device *dev)
 
 	dp_display_host_init(dp);
 
-	/* check for hpd high */
-	if  (dp->usbpd->hpd_high)
-		queue_work(dp->wq, &dp->connect_work);
+	/* check for hpd high and framework ready */
+	if  (dp->usbpd->hpd_high && dp_display_framework_ready(dp))
+		queue_delayed_work(dp->wq, &dp->connect_work, 0);
 end:
 	return rc;
 }
@@ -691,7 +695,7 @@ static int dp_display_usbpd_disconnect_cb(struct device *dev)
 	dp->aux->abort(dp->aux);
 
 	/* wait for idle state */
-	cancel_work(&dp->connect_work);
+	cancel_delayed_work(&dp->connect_work);
 	cancel_work(&dp->attention_work);
 	flush_workqueue(dp->wq);
 
@@ -733,7 +737,7 @@ static void dp_display_attention_work(struct work_struct *work)
 			return;
 		}
 
-		queue_work(dp->wq, &dp->connect_work);
+		queue_delayed_work(dp->wq, &dp->connect_work, 0);
 		return;
 	}
 
@@ -779,12 +783,18 @@ static int dp_display_usbpd_attention_cb(struct device *dev)
 		return -ENODEV;
 	}
 
+	/* check if framework is ready */
+	if (!dp_display_framework_ready(dp)) {
+		pr_err("framework not ready\n");
+		return -ENODEV;
+	}
+
 	if (dp->usbpd->hpd_irq && dp->usbpd->hpd_high &&
 	    dp->power_on) {
 		dp->link->process_request(dp->link);
 		queue_work(dp->wq, &dp->attention_work);
 	} else if (dp->usbpd->hpd_high) {
-		queue_work(dp->wq, &dp->connect_work);
+		queue_delayed_work(dp->wq, &dp->connect_work, 0);
 	} else {
 		/* cancel any pending request */
 		atomic_set(&dp->aborted, 1);
@@ -792,7 +802,7 @@ static int dp_display_usbpd_attention_cb(struct device *dev)
 		dp->aux->abort(dp->aux);
 
 		/* wait for idle state */
-		cancel_work(&dp->connect_work);
+		cancel_delayed_work(&dp->connect_work);
 		cancel_work(&dp->attention_work);
 		flush_workqueue(dp->wq);
 
@@ -805,7 +815,8 @@ static int dp_display_usbpd_attention_cb(struct device *dev)
 
 static void dp_display_connect_work(struct work_struct *work)
 {
-	struct dp_display_private *dp = container_of(work,
+	struct delayed_work *dw = to_delayed_work(work);
+	struct dp_display_private *dp = container_of(dw,
 			struct dp_display_private, connect_work);
 
 	if (dp->dp_display.is_connected && dp_display_framework_ready(dp)) {
@@ -1365,7 +1376,7 @@ static int dp_display_create_workqueue(struct dp_display_private *dp)
 	}
 
 	INIT_DELAYED_WORK(&dp->hdcp_cb_work, dp_display_hdcp_cb_work);
-	INIT_WORK(&dp->connect_work, dp_display_connect_work);
+	INIT_DELAYED_WORK(&dp->connect_work, dp_display_connect_work);
 	INIT_WORK(&dp->attention_work, dp_display_attention_work);
 
 	return 0;
@@ -1451,9 +1462,6 @@ int dp_display_get_displays(void **displays, int count)
 
 int dp_display_get_num_of_displays(void)
 {
-	if (!g_dp_display)
-		return 0;
-
 	return 1;
 }
 

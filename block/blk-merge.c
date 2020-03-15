@@ -305,7 +305,13 @@ void blk_recalc_rq_segments(struct request *rq)
 
 void blk_recount_segments(struct request_queue *q, struct bio *bio)
 {
-	unsigned short seg_cnt = bio_segments(bio);
+	unsigned short seg_cnt;
+
+	/* estimate segment number by bi_vcnt for non-cloned bio */
+	if (bio_flagged(bio, BIO_CLONED))
+		seg_cnt = bio_segments(bio);
+	else
+		seg_cnt = bio->bi_vcnt;
 
 	if (test_bit(QUEUE_FLAG_NO_SG_MERGE, &q->queue_flags) &&
 			(seg_cnt < queue_max_segments(q)))
@@ -870,10 +876,6 @@ bool blk_rq_merge_ok(struct request *rq, struct bio *bio)
 
 int blk_try_merge(struct request *rq, struct bio *bio)
 {
-#ifdef CONFIG_PFK
-	if (blk_rq_dun(rq) || bio_dun(bio))
-		return ELEVATOR_NO_MERGE;
-#endif
 	if (blk_rq_pos(rq) + blk_rq_sectors(rq) == bio->bi_iter.bi_sector)
 		return ELEVATOR_BACK_MERGE;
 	else if (blk_rq_pos(rq) - bio_sectors(bio) == bio->bi_iter.bi_sector)

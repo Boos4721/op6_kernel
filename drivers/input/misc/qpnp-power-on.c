@@ -35,7 +35,6 @@
 #include <linux/qpnp/qpnp-misc.h>
 #include <linux/power_supply.h>
 #include <linux/atomic.h>
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 #include <linux/syscalls.h>
 #include <linux/power/oem_external_fg.h>
 #include <linux/oem_force_dump.h>
@@ -202,6 +201,8 @@ struct pon_regulator {
 	u32			bit;
 	bool			enabled;
 };
+
+	struct delayed_work     press_work;
 
 static int pon_ship_mode_en;
 module_param_named(
@@ -452,19 +453,6 @@ static ssize_t qpnp_pon_dbc_store(struct device *dev,
 	return size;
 }
 
-static struct qpnp_pon_config *
-qpnp_get_cfg(struct qpnp_pon *pon, u32 pon_type)
-{
-	int i;
-
-	for (i = 0; i < pon->num_pon_config; i++) {
-		if (pon_type == pon->pon_cfg[i].pon_type)
-			return  &pon->pon_cfg[i];
-	}
-
-	return NULL;
-}
-
 static DEVICE_ATTR(debounce_us, 0664, qpnp_pon_dbc_show, qpnp_pon_dbc_store);
 
 #define PON_TWM_ENTRY_PBS_BIT           BIT(0)
@@ -474,7 +462,6 @@ static int qpnp_pon_reset_config(struct qpnp_pon *pon,
 	int rc;
 	bool disable = false;
 	u16 rst_en_reg;
-	struct qpnp_pon_config *cfg;
 
 	/* Ignore the PS_HOLD reset config if TWM ENTRY is enabled */
 	if (pon->support_twm_config && pon->twm_state == PMIC_TWM_ENABLE) {
@@ -485,18 +472,6 @@ static int qpnp_pon_reset_config(struct qpnp_pon *pon,
 							rc);
 			return rc;
 		}
-
-		cfg = qpnp_get_cfg(pon, PON_KPDPWR);
-		if (cfg) {
-			/* configure KPDPWR_S2 to Hard reset */
-			rc = qpnp_pon_masked_write(pon, cfg->s2_cntl_addr,
-						QPNP_PON_S2_CNTL_TYPE_MASK,
-						PON_POWER_OFF_HARD_RESET);
-			if (rc < 0)
-				pr_err("Unable to config KPDPWR_N S2 for hard-reset rc=%d\n",
-					rc);
-		}
-
 		pr_crit("PMIC configured for TWM entry\n");
 		return 0;
 	}
@@ -892,6 +867,19 @@ static int qpnp_pon_store_and_clear_warm_reset(struct qpnp_pon *pon)
 	return 0;
 }
 
+static struct qpnp_pon_config *
+qpnp_get_cfg(struct qpnp_pon *pon, u32 pon_type)
+{
+	int i;
+
+	for (i = 0; i < pon->num_pon_config; i++) {
+		if (pon_type == pon->pon_cfg[i].pon_type)
+			return  &pon->pon_cfg[i];
+	}
+
+	return NULL;
+}
+
 static int
 qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 {
@@ -928,6 +916,11 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 
 	switch (cfg->pon_type) {
 	case PON_KPDPWR:
+		if ((pon_rt_sts & pon_rt_bit) == 0)
+			pr_info("Power-Key UP\n");
+		else
+			pr_info("Power-Key DOWN\n");
+
 		pon_rt_bit = QPNP_PON_KPDPWR_N_SET;
 		if ((pon_rt_sts & pon_rt_bit) == 0) {
 			pr_info("Power-Key UP\n");
@@ -1241,13 +1234,12 @@ static irqreturn_t qpnp_resin_bark_irq(int irq, void *_pon)
 err_exit:
 	return IRQ_HANDLED;
 }
-/*20151106,wujialong add for power dump capture*/
 static int qpnp_config_reset(struct qpnp_pon *pon, struct qpnp_pon_config *cfg);
 
 static unsigned int pwr_dump_enabled = -1;
 static unsigned int long_pwr_dump_enabled = -1;
 
-static int param_set_pwr_dump_enabled(const char *val, const struct kernel_param *kp)
+static int param_set_pwr_dump_enabled(const char *val, struct kernel_param *kp)
 {
 	unsigned long enable;
 	struct qpnp_pon *pon = sys_reset_dev;
@@ -1279,7 +1271,7 @@ static int param_set_pwr_dump_enabled(const char *val, const struct kernel_param
 }
 
 static int param_set_long_press_pwr_dump_enabled
-(const char *val, const struct kernel_param *kp)
+(const char *val, struct kernel_param *kp)
 {
 	unsigned long enable;
 	struct qpnp_pon *pon = sys_reset_dev;
@@ -1327,7 +1319,6 @@ module_param_call(long_pwr_dump_enabled,
 param_set_long_press_pwr_dump_enabled,
 param_get_uint, &long_pwr_dump_enabled, 0644);
 
-/*20151106,wujialong add for power dump capture*/
 
 static int
 qpnp_config_pull(struct qpnp_pon *pon, struct qpnp_pon_config *cfg)
@@ -2263,35 +2254,6 @@ static int read_gen2_pon_off_reason(struct qpnp_pon *pon, u16 *reason,
 	return 0;
 }
 
-static int pon_twm_notifier_cb(struct notifier_block *nb,
-				unsigned long action, void *data)
-{
-	struct qpnp_pon *pon = container_of(nb, struct qpnp_pon, pon_nb);
-
-	if (action != PMIC_TWM_CLEAR &&
-			action != PMIC_TWM_ENABLE) {
-		pr_debug("Unsupported option %lu\n", action);
-		return NOTIFY_OK;
-	}
-
-	pon->twm_state = (u8)action;
-	pr_debug("TWM state = %d\n", pon->twm_state);
-
-	return NOTIFY_OK;
-}
-
-static int pon_register_twm_notifier(struct qpnp_pon *pon)
-{
-	int rc;
-
-	pon->pon_nb.notifier_call = pon_twm_notifier_cb;
-	rc = qpnp_misc_twm_notifier_register(&pon->pon_nb);
-	if (rc < 0)
-		pr_err("Failed to register pon_twm_notifier_cb rc=%d\n", rc);
-
-	return rc;
-}
-
 static bool created_pwr_on_off_obj;
 
 #define PMIC_SID_NUM 3
@@ -2476,6 +2438,35 @@ static struct attribute_group pwr_on_off_attrs_group = {
 		.attrs = pwr_on_off_attrs,
 };
 static struct kobject *pwr_on_off_kobj;
+
+static int pon_twm_notifier_cb(struct notifier_block *nb,
+				unsigned long action, void *data)
+{
+	struct qpnp_pon *pon = container_of(nb, struct qpnp_pon, pon_nb);
+
+	if (action != PMIC_TWM_CLEAR &&
+			action != PMIC_TWM_ENABLE) {
+		pr_debug("Unsupported option %lu\n", action);
+		return NOTIFY_OK;
+	}
+
+	pon->twm_state = (u8)action;
+	pr_debug("TWM state = %d\n", pon->twm_state);
+
+	return NOTIFY_OK;
+}
+
+static int pon_register_twm_notifier(struct qpnp_pon *pon)
+{
+	int rc;
+
+	pon->pon_nb.notifier_call = pon_twm_notifier_cb;
+	rc = qpnp_misc_twm_notifier_register(&pon->pon_nb);
+	if (rc < 0)
+		pr_err("Failed to register pon_twm_notifier_cb rc=%d\n", rc);
+
+	return rc;
+}
 
 static int qpnp_pon_probe(struct platform_device *pdev)
 {
@@ -2961,8 +2952,6 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 	pon->store_hard_reset_reason = of_property_read_bool(pdev->dev.of_node,
 					"qcom,store-hard-reset-reason");
 
-	pon->legacy_hard_reset_offset = of_property_read_bool(pdev->dev.of_node,
-					"qcom,use-legacy-hard-reset-offset");
 	if (!created_pwr_on_off_obj) {
 		pwr_on_off_kobj = kobject_create_and_add("pwr_on_off_reason",
 		NULL);
@@ -2975,6 +2964,9 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 		}
 		created_pwr_on_off_obj = true;
 	}
+
+	pon->legacy_hard_reset_offset = of_property_read_bool(pdev->dev.of_node,
+					"qcom,use-legacy-hard-reset-offset");
 
 	qpnp_pon_debugfs_init(pdev);
 	return 0;

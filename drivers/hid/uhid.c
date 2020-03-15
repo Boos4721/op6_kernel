@@ -26,7 +26,6 @@
 #include <linux/uhid.h>
 #include <linux/wait.h>
 #include <linux/uaccess.h>
-#include <linux/eventpoll.h>
 
 #define UHID_NAME	"uhid"
 #define UHID_BUFSIZE	32
@@ -147,15 +146,26 @@ static void uhid_hid_stop(struct hid_device *hid)
 static int uhid_hid_open(struct hid_device *hid)
 {
 	struct uhid_device *uhid = hid->driver_data;
+	int retval = 0;
 
-	return uhid_queue_event(uhid, UHID_OPEN);
+	mutex_lock(&uhid_open_mutex);
+	if (!hid->open++) {
+		retval = uhid_queue_event(uhid, UHID_OPEN);
+		if (retval)
+			hid->open--;
+	}
+	mutex_unlock(&uhid_open_mutex);
+	return retval;
 }
 
 static void uhid_hid_close(struct hid_device *hid)
 {
 	struct uhid_device *uhid = hid->driver_data;
 
-	uhid_queue_event(uhid, UHID_CLOSE);
+	mutex_lock(&uhid_open_mutex);
+	if (!--hid->open)
+		uhid_queue_event(uhid, UHID_CLOSE);
+	mutex_unlock(&uhid_open_mutex);
 }
 
 static int uhid_hid_parse(struct hid_device *hid)
@@ -771,14 +781,13 @@ unlock:
 static unsigned int uhid_char_poll(struct file *file, poll_table *wait)
 {
 	struct uhid_device *uhid = file->private_data;
-	unsigned int mask = POLLOUT | POLLWRNORM; /* uhid is always writable */
 
 	poll_wait(file, &uhid->waitq, wait);
 
 	if (uhid->head != uhid->tail)
-		mask |= POLLIN | POLLRDNORM;
+		return POLLIN | POLLRDNORM;
 
-	return mask;
+	return 0;
 }
 
 static const struct file_operations uhid_fops = {

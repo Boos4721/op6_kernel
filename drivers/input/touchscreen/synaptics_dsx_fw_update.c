@@ -2055,9 +2055,7 @@ static int fwu_write_f34_v7_blocks(unsigned char *block_ptr,
 			block_ptr += write_size;
 			left_bytes -= write_size;
 		} while (left_bytes);
-		/*moragan the pollingwap to increase firmware time */
 		retval = fwu_wait_for_idle(WRITE_WAIT_MS, true);
-		/*#endif */
 		if (retval < 0) {
 			TPD_ERR("%s: Failed to wait idle (remaining %d)\n",
 					__func__, remaining);
@@ -2392,7 +2390,7 @@ static enum flash_area fwu_go_nogo(void)
 	} else if (image_fw_id < device_fw_id) {
 		TPD_ERR("%s: Image firmware ID older than device firmware ID\n",
 				__func__);
-		flash_area = NONE;
+		flash_area = UI_FIRMWARE;
 		goto exit;
 	}
 
@@ -2415,7 +2413,7 @@ static enum flash_area fwu_go_nogo(void)
 			flash_area = UI_CONFIG;
 			goto exit;
 		} else if (fwu->img.ui_config.data[ii] < fwu->config_id[ii]) {
-			flash_area = NONE;
+			flash_area = UI_CONFIG;
 			goto exit;
 		}
 	}

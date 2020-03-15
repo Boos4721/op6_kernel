@@ -29,7 +29,7 @@
 #include "walt.h"
 
 #include <trace/events/sched.h>
-#include "../drivers/oneplus/coretech/uxcore/opchain_helper.h"
+#include "../drivers/oneplus/coretech/opchain/opchain_helper.h"
 
 const char *task_event_names[] = {"PUT_PREV_TASK", "PICK_NEXT_TASK",
 				  "TASK_WAKE", "TASK_MIGRATE", "TASK_UPDATE",
@@ -88,16 +88,11 @@ late_initcall(sched_init_ops);
 static void acquire_rq_locks_irqsave(const cpumask_t *cpus,
 				     unsigned long *flags)
 {
-	int cpu, level = 0;
+	int cpu;
 
 	local_irq_save(*flags);
-	for_each_cpu(cpu, cpus) {
-		if (level == 0)
-			raw_spin_lock(&cpu_rq(cpu)->lock);
-		else
-			raw_spin_lock_nested(&cpu_rq(cpu)->lock, level);
-		level++;
-	}
+	for_each_cpu(cpu, cpus)
+		raw_spin_lock(&cpu_rq(cpu)->lock);
 }
 
 static void release_rq_locks_irqrestore(const cpumask_t *cpus,
@@ -371,12 +366,11 @@ bool early_detection_notify(struct rq *rq, u64 wallclock)
 	struct task_struct *p;
 	int loop_max = 10;
 
-	rq->ed_task = NULL;
-
 	if ((!walt_rotation_enabled && sched_boost_policy() ==
 			SCHED_BOOST_NONE) || !rq->cfs.h_nr_running)
 		return 0;
 
+	rq->ed_task = NULL;
 	list_for_each_entry(p, &rq->cfs_tasks, se.group_node) {
 		if (!loop_max)
 			break;
@@ -524,7 +518,6 @@ u64 freq_policy_load(struct rq *rq)
 	struct sched_cluster *cluster = rq->cluster;
 	u64 aggr_grp_load = cluster->aggr_grp_load;
 	u64 load, tt_load = 0;
-	u64 coloc_boost_load = cluster->coloc_boost_load;
 
 	if (rq->ed_task != NULL) {
 		load = sched_ravg_window;
@@ -535,9 +528,6 @@ u64 freq_policy_load(struct rq *rq)
 		load = rq->prev_runnable_sum + aggr_grp_load;
 	else
 		load = rq->prev_runnable_sum + rq->grp_time.prev_runnable_sum;
-
-	if (coloc_boost_load)
-		load = max_t(u64, load, coloc_boost_load);
 
 	tt_load = top_task_load(rq);
 	switch (reporting_policy) {
@@ -555,9 +545,7 @@ u64 freq_policy_load(struct rq *rq)
 
 done:
 	trace_sched_load_to_gov(rq, aggr_grp_load, tt_load, freq_aggr_thresh,
-				load, reporting_policy, walt_rotation_enabled,
-				sysctl_sched_little_cluster_coloc_fmin_khz,
-				coloc_boost_load);
+				load, reporting_policy, walt_rotation_enabled);
 	return load;
 }
 
@@ -714,11 +702,14 @@ static inline void inter_cluster_migration_fixup
 	BUG_ON((s64)src_rq->nt_curr_runnable_sum < 0);
 }
 
-static u32 load_to_index(u32 load)
+static int load_to_index(u32 load)
 {
-	u32 index = load / sched_load_granule;
-
-	return min(index, (u32)(NUM_LOAD_INDICES - 1));
+	if (load < sched_load_granule)
+		return 0;
+	else if (load >= sched_ravg_window)
+		return NUM_LOAD_INDICES - 1;
+	else
+		return load / sched_load_granule;
 }
 
 static void
@@ -2200,7 +2191,7 @@ static int compute_max_possible_capacity(struct sched_cluster *cluster)
 	return capacity;
 }
 
-void walt_update_min_max_capacity(void)
+static void update_min_max_capacity(void)
 {
 	unsigned long flags;
 
@@ -2400,7 +2391,6 @@ struct sched_cluster init_cluster = {
 	.notifier_sent		=	0,
 	.wake_up_idle		=	0,
 	.aggr_grp_load		=	0,
-	.coloc_boost_load	=	0,
 };
 
 void init_clusters(void)
@@ -2427,7 +2417,7 @@ static int cpufreq_notifier_policy(struct notifier_block *nb,
 		return 0;
 
 	if (val == CPUFREQ_REMOVE_POLICY || val == CPUFREQ_CREATE_POLICY) {
-		walt_update_min_max_capacity();
+		update_min_max_capacity();
 		return 0;
 	}
 
@@ -2643,6 +2633,7 @@ static void _set_preferred_cluster(struct related_thread_group *grp)
 {
 	struct task_struct *p;
 	u64 combined_demand = 0;
+	bool boost_on_big = sched_boost_policy() == SCHED_BOOST_ON_BIG;
 	bool group_boost = false;
 	u64 wallclock;
 
@@ -2666,7 +2657,7 @@ static void _set_preferred_cluster(struct related_thread_group *grp)
 		return;
 
 	list_for_each_entry(p, &grp->tasks, grp_list) {
-		if (task_boost_policy(p) == SCHED_BOOST_ON_BIG) {
+		if (boost_on_big && task_sched_boost(p)) {
 			group_boost = true;
 			break;
 		}
@@ -3176,70 +3167,6 @@ static void transfer_busy_time(struct rq *rq, struct related_thread_group *grp,
 	BUG_ON((s64)*src_nt_prev_runnable_sum < 0);
 }
 
-unsigned int sysctl_sched_little_cluster_coloc_fmin_khz;
-static u64 coloc_boost_load;
-
-void walt_map_freq_to_load(void)
-{
-	struct sched_cluster *cluster;
-
-	for_each_sched_cluster(cluster) {
-		if (is_min_capacity_cluster(cluster)) {
-			int fcpu = cluster_first_cpu(cluster);
-
-			coloc_boost_load = div64_u64(
-				((u64)sched_ravg_window *
-				arch_scale_cpu_capacity(NULL, fcpu) *
-				sysctl_sched_little_cluster_coloc_fmin_khz),
-				(u64)1024 * cpu_max_possible_freq(fcpu));
-			coloc_boost_load = div64_u64(coloc_boost_load << 2, 5);
-			break;
-		}
-	}
-}
-
-static void walt_update_coloc_boost_load(void)
-{
-	struct related_thread_group *grp;
-	struct sched_cluster *cluster;
-
-	if (!sysctl_sched_little_cluster_coloc_fmin_khz ||
-			sysctl_sched_boost == CONSERVATIVE_BOOST)
-		return;
-
-	grp = lookup_related_thread_group(DEFAULT_CGROUP_COLOC_ID);
-	if (!grp || !grp->preferred_cluster ||
-			is_min_capacity_cluster(grp->preferred_cluster))
-		return;
-
-	for_each_sched_cluster(cluster) {
-		if (is_min_capacity_cluster(cluster)) {
-			cluster->coloc_boost_load = coloc_boost_load;
-			break;
-		}
-	}
-}
-
-int sched_little_cluster_coloc_fmin_khz_handler(struct ctl_table *table,
-				int write, void __user *buffer, size_t *lenp,
-				loff_t *ppos)
-{
-	int ret;
-	static DEFINE_MUTEX(mutex);
-
-	mutex_lock(&mutex);
-
-	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
-	if (ret || !write)
-		goto done;
-
-	walt_map_freq_to_load();
-
-done:
-	mutex_unlock(&mutex);
-	return ret;
-}
-
 /*
  * Runs in hard-irq context. This should ideally run just after the latest
  * window roll-over.
@@ -3249,22 +3176,15 @@ void walt_irq_work(struct irq_work *irq_work)
 	struct sched_cluster *cluster;
 	struct rq *rq;
 	int cpu;
-	u64 wc, total_grp_load = 0;
-	int flag = SCHED_CPUFREQ_WALT;
+	u64 wc;
 	bool is_migration = false;
-	int level = 0;
 
 	/* Am I the window rollover work or the migration work? */
 	if (irq_work == &walt_migration_irq_work)
 		is_migration = true;
 
-	for_each_cpu(cpu, cpu_possible_mask) {
-		if (level == 0)
-			raw_spin_lock(&cpu_rq(cpu)->lock);
-		else
-			raw_spin_lock_nested(&cpu_rq(cpu)->lock, level);
-		level++;
-	}
+	for_each_cpu(cpu, cpu_possible_mask)
+		raw_spin_lock(&cpu_rq(cpu)->lock);
 
 	wc = sched_ktime_clock();
 	walt_load_reported_window = atomic64_read(&walt_irq_work_lastq_ws);
@@ -3285,27 +3205,22 @@ void walt_irq_work(struct irq_work *irq_work)
 		}
 
 		cluster->aggr_grp_load = aggr_grp_load;
-		total_grp_load = aggr_grp_load;
-		cluster->coloc_boost_load = 0;
 
 		raw_spin_unlock(&cluster->load_lock);
 	}
 
-	if (total_grp_load)
-		walt_update_coloc_boost_load();
-
 	for_each_sched_cluster(cluster) {
 		for_each_cpu(cpu, &cluster->cpus) {
-			int nflag = flag;
+			int nflag = 0;
 
 			rq = cpu_rq(cpu);
 
 			if (is_migration) {
 				if (rq->notif_pending) {
-					nflag |= SCHED_CPUFREQ_INTERCLUSTER_MIG;
+					nflag = SCHED_CPUFREQ_INTERCLUSTER_MIG;
 					rq->notif_pending = false;
 				} else {
-					nflag |= SCHED_CPUFREQ_FORCE_UPDATE;
+					nflag = SCHED_CPUFREQ_FORCE_UPDATE;
 				}
 			}
 

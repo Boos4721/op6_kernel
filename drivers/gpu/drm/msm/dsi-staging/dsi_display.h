@@ -181,7 +181,6 @@ struct dsi_display {
 	int disp_te_gpio;
 	bool is_te_irq_enabled;
 	struct completion esd_te_gate;
-
 	u32 ctrl_count;
 	struct dsi_display_ctrl ctrl[MAX_DSI_CTRLS_PER_DISPLAY];
 
@@ -398,14 +397,13 @@ int dsi_display_validate_mode(struct dsi_display *display,
 			      u32 flags);
 
 /**
- * dsi_display_validate_mode_change() - validates mode if variable refresh case
- *				or dynamic clk change case
+ * dsi_display_validate_mode_vrr() - validates mode if variable refresh case
  * @display:             Handle to display.
  * @mode:                Mode to be validated..
  *
  * Return: 0 if  error code.
  */
-int dsi_display_validate_mode_change(struct dsi_display *display,
+int dsi_display_validate_mode_vrr(struct dsi_display *display,
 			struct dsi_display_mode *cur_dsi_mode,
 			struct dsi_display_mode *mode);
 

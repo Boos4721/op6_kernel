@@ -235,7 +235,6 @@ void usb_sw_gpio_set(int value)
 		gpio_direction_output(fastchg_di->usb_sw_2_gpio, 0);
 	}
 	fastchg_di->fast_chg_allow = value;
-	/* david@bsp add log */
 	pr_info("get usb_sw_gpio=%d&%d\n"
 		, gpio_get_value(fastchg_di->usb_sw_1_gpio)
 		, gpio_get_value(fastchg_di->usb_sw_2_gpio));
@@ -256,7 +255,6 @@ static int set_property_on_smbcharger(
 		}
 	}
 	ret = power_supply_set_property(psy, prop, &value);
-	/* david@bsp modified */
 	if (ret)
 		return -EINVAL;
 
@@ -472,7 +470,7 @@ static void dashchg_fw_update(struct work_struct *work)
 		reset_mcu_and_request_irq(di);
 		__pm_relax(&di->fastchg_update_fireware_lock);
 		set_property_on_smbcharger(POWER_SUPPLY_PROP_SWITCH_DASH, true);
-		pr_info("FW check success\n"); /* david@bsp add log */
+		pr_info("FW check success\n");
 		return;
 	}
 	pr_info("start erasing data.......\n");
@@ -1136,7 +1134,10 @@ static long  dash_dev_ioctl(struct file *filp, unsigned int cmd,
 			dash_write(di, ALLOW_DATA);
 			break;
 		case DASH_NOTIFY_UPDATE_ADAPTER_INFO:
-				di->dash_enhance = arg;
+			if (arg == DASH_NOTIFY_UPDATE_ADAPTER_INFO + 1)
+				di->dash_enhance = 1;
+			else if (arg == DASH_NOTIFY_UPDATE_ADAPTER_INFO + 2)
+				di->dash_enhance = 0;
 			break;
 
 		case DASH_NOTIFY_BAD_CONNECTED:
@@ -1444,7 +1445,7 @@ static void check_enhance_support(struct fastchg_device_info *di)
 
 
 /* @bsp 2018/09/05 FAT-4556 fix the audio heaset pop issue when shutdown*/
-static int set_mcu_reset_ahead(const char *val, const struct kernel_param *kp)
+static int set_mcu_reset_ahead(const char *val, struct kernel_param *kp)
 {
 	unsigned long reset_value = 0;
 	int ret = 0;
@@ -1474,7 +1475,7 @@ static int set_mcu_reset_ahead(const char *val, const struct kernel_param *kp)
 	return 0;
 }
 
-static int get_mcu_reset_status(char *buffer, const struct kernel_param *kp)
+static int get_mcu_reset_status(char *buffer, struct kernel_param *kp)
 {
 	int cnt = 0;
 

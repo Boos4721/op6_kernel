@@ -36,8 +36,6 @@
 /* Do not use these with a slab allocator */
 #define GFP_SLAB_BUG_MASK (__GFP_DMA32|__GFP_HIGHMEM|~__GFP_BITS_MASK)
 
-void page_writeback_init(void);
-
 int do_swap_page(struct fault_env *fe, pte_t orig_pte);
 
 #ifdef CONFIG_SPECULATIVE_PAGE_FAULT
@@ -100,10 +98,6 @@ static inline void set_page_refcounted(struct page *page)
 
 extern unsigned long highest_memmap_pfn;
 
-#ifdef CONFIG_KSWAPD_LAZY_RECLAIM
-extern atomic_t alloc_ongoing;
-#endif
-
 /*
  * Maximum number of reclaim retries without progress before the OOM
  * killer is consider the only way forward.
@@ -145,9 +139,7 @@ struct alloc_context {
 	int migratetype;
 	enum zone_type high_zoneidx;
 	bool spread_dirty_pages;
-#ifdef CONFIG_KSWAPD_LAZY_RECLAIM
 	bool lr_handle;
-#endif
 };
 
 #define ac_classzone_idx(ac) zonelist_zone_idx(ac->preferred_zoneref)
@@ -234,9 +226,9 @@ isolate_freepages_range(struct compact_control *cc,
 unsigned long
 isolate_migratepages_range(struct compact_control *cc,
 			   unsigned long low_pfn, unsigned long end_pfn);
-int find_suitable_fallback(struct free_area *area, unsigned int order,
-			int migratetype, bool only_stealable, bool *can_steal);
-
+int find_suitable_fallback(struct free_area *area, unsigned int current_order,
+			   int migratetype, bool only_stealable,
+			   int start_order, bool *can_steal);
 #endif
 
 /*
@@ -474,16 +466,6 @@ static inline void mminit_validate_memmodel_limits(unsigned long *start_pfn,
 #define NODE_RECLAIM_FULL	-1
 #define NODE_RECLAIM_SOME	0
 #define NODE_RECLAIM_SUCCESS	1
-
-#ifdef CONFIG_NUMA
-extern int node_reclaim(struct pglist_data *, gfp_t, unsigned int);
-#else
-static inline int node_reclaim(struct pglist_data *pgdat, gfp_t mask,
-				unsigned int order)
-{
-	return NODE_RECLAIM_NOSCAN;
-}
-#endif
 
 extern int hwpoison_filter(struct page *p);
 

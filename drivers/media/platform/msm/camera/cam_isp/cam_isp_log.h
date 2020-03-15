@@ -15,7 +15,7 @@
 
 #include <linux/kernel.h>
 
-#define ISP_TRACE_ENABLE			0
+#define ISP_TRACE_ENABLE			1
 
 #if (ISP_TRACE_ENABLE == 1)
 	#define ISP_TRACE(args...)		trace_printk(args)

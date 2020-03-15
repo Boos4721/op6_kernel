@@ -60,8 +60,6 @@ struct gmu_vma {
 	unsigned int image_start;
 };
 
-#define GMU_CM3_CFG_NONMASKINTR_SHIFT    9
-
 struct gmu_iommu_context {
 	const char *name;
 	struct device *dev;
@@ -452,7 +450,7 @@ int gmu_dcvs_set(struct gmu_device *gmu,
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 	struct adreno_gpudev *gpudev = ADRENO_GPU_DEVICE(adreno_dev);
 	int perf_idx = INVALID_DCVS_IDX, bw_idx = INVALID_DCVS_IDX;
-	int ret = 0;
+	int ret;
 
 	if (gpu_pwrlevel < gmu->num_gpupwrlevels - 1)
 		perf_idx = gmu->num_gpupwrlevels - gpu_pwrlevel - 1;
@@ -464,22 +462,23 @@ int gmu_dcvs_set(struct gmu_device *gmu,
 		(bw_idx == INVALID_DCVS_IDX))
 		return -EINVAL;
 
-	if (ADRENO_QUIRK(adreno_dev, ADRENO_QUIRK_HFI_USE_REG))
+	if (ADRENO_QUIRK(adreno_dev, ADRENO_QUIRK_HFI_USE_REG)) {
 		ret = gpudev->rpmh_gpu_pwrctrl(adreno_dev,
 			GMU_DCVS_NOHFI, perf_idx, bw_idx);
-	else if (test_bit(GMU_HFI_ON, &gmu->flags))
-		ret = hfi_send_dcvs_vote(gmu, perf_idx, bw_idx, ACK_NONBLOCK);
 
-	if (ret) {
-		dev_err_ratelimited(&gmu->pdev->dev,
-			"Failed to set GPU perf idx %d, bw idx %d\n",
-			perf_idx, bw_idx);
+		if (ret) {
+			dev_err_ratelimited(&gmu->pdev->dev,
+				"Failed to set GPU perf idx %d, bw idx %d\n",
+				perf_idx, bw_idx);
 
-		adreno_set_gpu_fault(adreno_dev, ADRENO_GMU_FAULT);
-		adreno_dispatcher_schedule(device);
+			adreno_set_gpu_fault(adreno_dev, ADRENO_GMU_FAULT);
+			adreno_dispatcher_schedule(device);
+		}
+
+		return ret;
 	}
 
-	return ret;
+	return hfi_send_dcvs_vote(gmu, perf_idx, bw_idx, ACK_NONBLOCK);
 }
 
 struct rpmh_arc_vals {
@@ -788,30 +787,12 @@ static int gmu_rpmh_init(struct gmu_device *gmu, struct kgsl_pwrctrl *pwr)
 	return rpmh_arc_votes_init(gmu, &cx_arc, &mx_arc, GMU_ARC_VOTE);
 }
 
-static void send_nmi_to_gmu(struct adreno_device *adreno_dev)
-{
-	/* Mask so there's no interrupt caused by NMI */
-	adreno_write_gmureg(adreno_dev,
-			ADRENO_REG_GMU_GMU2HOST_INTR_MASK, 0xFFFFFFFF);
-
-	/* Make sure the interrupt is masked before causing it */
-	wmb();
-	adreno_write_gmureg(adreno_dev,
-		ADRENO_REG_GMU_NMI_CONTROL_STATUS, 0);
-	adreno_write_gmureg(adreno_dev,
-		ADRENO_REG_GMU_CM3_CFG,
-		(1 << GMU_CM3_CFG_NONMASKINTR_SHIFT));
-
-	/* Make sure the NMI is invoked before we proceed*/
-	wmb();
-}
-
 static irqreturn_t gmu_irq_handler(int irq, void *data)
 {
 	struct gmu_device *gmu = data;
 	struct kgsl_device *device = container_of(gmu, struct kgsl_device, gmu);
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-	unsigned int mask, status = 0;
+	unsigned int status = 0;
 
 	adreno_read_gmureg(ADRENO_DEVICE(device),
 			ADRENO_REG_GMU_AO_HOST_INTERRUPT_STATUS, &status);
@@ -820,20 +801,6 @@ static irqreturn_t gmu_irq_handler(int irq, void *data)
 
 	/* Ignore GMU_INT_RSCC_COMP and GMU_INT_DBD WAKEUP interrupts */
 	if (status & GMU_INT_WDOG_BITE) {
-		/* Temporarily mask the watchdog interrupt to prevent a storm */
-		adreno_read_gmureg(adreno_dev,
-				ADRENO_REG_GMU_AO_HOST_INTERRUPT_MASK, &mask);
-		adreno_write_gmureg(adreno_dev,
-				ADRENO_REG_GMU_AO_HOST_INTERRUPT_MASK,
-				(mask | GMU_INT_WDOG_BITE));
-
-		send_nmi_to_gmu(adreno_dev);
-		/*
-		 * There is sufficient delay for the GMU to have finished
-		 * handling the NMI before snapshot is taken, as the fault
-		 * worker is scheduled below.
-		 */
-
 		dev_err_ratelimited(&gmu->pdev->dev,
 				"GMU watchdog expired interrupt received\n");
 		adreno_set_gpu_fault(adreno_dev, ADRENO_GMU_FAULT);
@@ -1383,8 +1350,19 @@ void gmu_snapshot(struct kgsl_device *device)
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 	struct gmu_device *gmu = &device->gmu;
 
-	send_nmi_to_gmu(adreno_dev);
+	/* Mask so there's no interrupt caused by NMI */
+	adreno_write_gmureg(adreno_dev,
+			ADRENO_REG_GMU_GMU2HOST_INTR_MASK, 0xFFFFFFFF);
+
+	/* Make sure the interrupt is masked before causing it */
+	wmb();
+	adreno_write_gmureg(adreno_dev,
+		ADRENO_REG_GMU_NMI_CONTROL_STATUS, 0);
+	adreno_write_gmureg(adreno_dev,
+		ADRENO_REG_GMU_CM3_CFG, (1 << 9));
+
 	/* Wait for the NMI to be handled */
+	wmb();
 	udelay(100);
 	kgsl_device_snapshot(device, NULL, true);
 
@@ -1442,7 +1420,7 @@ int gmu_start(struct kgsl_device *device)
 
 		/* Vote for 300MHz DDR for GMU to init */
 		ret = msm_bus_scale_client_update_request(gmu->pcl,
-				pwr->pwrlevels[pwr->default_pwrlevel].bus_freq);
+				pwr->pwrlevels[pwr->num_pwrlevels - 1].bus_freq);
 		if (ret)
 			dev_err(&gmu->pdev->dev,
 				"Failed to allocate gmu b/w: %d\n", ret);
@@ -1457,7 +1435,7 @@ int gmu_start(struct kgsl_device *device)
 			goto error_gmu;
 
 		/* Request default DCVS level */
-		gmu_change_gpu_pwrlevel(device, pwr->default_pwrlevel);
+		gmu_change_gpu_pwrlevel(device, pwr->num_pwrlevels - 1);
 		msm_bus_scale_client_update_request(gmu->pcl, 0);
 		break;
 
@@ -1485,7 +1463,7 @@ int gmu_start(struct kgsl_device *device)
 		if (ret)
 			goto error_gmu;
 
-		gmu_change_gpu_pwrlevel(device, pwr->default_pwrlevel);
+		gmu_change_gpu_pwrlevel(device, pwr->num_pwrlevels - 1);
 		break;
 
 	case KGSL_STATE_RESET:
@@ -1507,8 +1485,7 @@ int gmu_start(struct kgsl_device *device)
 				goto error_gmu;
 
 			/* Send DCVS level prior to reset*/
-			gmu_change_gpu_pwrlevel(device,
-				pwr->default_pwrlevel);
+			gmu_change_gpu_pwrlevel(device, pwr->num_pwrlevels - 1);
 		} else {
 			/* GMU fast boot */
 			hfi_stop(gmu);

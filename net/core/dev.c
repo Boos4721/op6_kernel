@@ -3030,7 +3030,7 @@ struct sk_buff *dev_hard_start_xmit(struct sk_buff *first, struct net_device *de
 		}
 
 		skb = next;
-		if (netif_tx_queue_stopped(txq) && skb) {
+		if (netif_xmit_stopped(txq) && skb) {
 			rc = NETDEV_TX_BUSY;
 			break;
 		}
@@ -4223,8 +4223,7 @@ static inline int nf_ingress(struct sk_buff *skb, struct packet_type **pt_prev,
 int (*gsb_nw_stack_recv)(struct sk_buff *skb) __rcu __read_mostly;
 EXPORT_SYMBOL(gsb_nw_stack_recv);
 
-int (*athrs_fast_nat_recv)(struct sk_buff *skb,
-			   struct packet_type *pt_temp) __rcu __read_mostly;
+int (*athrs_fast_nat_recv)(struct sk_buff *skb) __rcu __read_mostly;
 EXPORT_SYMBOL(athrs_fast_nat_recv);
 
 int (*embms_tm_multicast_recv)(struct sk_buff *skb) __rcu __read_mostly;
@@ -4239,7 +4238,7 @@ static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 	int ret = NET_RX_DROP;
 	__be16 type;
 	int (*gsb_ns_recv)(struct sk_buff *skb);
-	int (*fast_recv)(struct sk_buff *skb, struct packet_type *pt_temp);
+	int (*fast_recv)(struct sk_buff *skb);
 	int (*embms_recv)(struct sk_buff *skb);
 
 	net_timestamp_check(!netdev_tstamp_prequeue, skb);
@@ -4309,7 +4308,7 @@ skip_taps:
 	}
 	fast_recv = rcu_dereference(athrs_fast_nat_recv);
 	if (fast_recv) {
-		if (fast_recv(skb, pt_prev)) {
+		if (fast_recv(skb)) {
 			ret = NET_RX_SUCCESS;
 			goto out;
 		}
@@ -6716,8 +6715,7 @@ static int __dev_set_mtu(struct net_device *dev, int new_mtu)
 	if (ops->ndo_change_mtu)
 		return ops->ndo_change_mtu(dev, new_mtu);
 
-	/* Pairs with all the lockless reads of dev->mtu in the stack */
-	WRITE_ONCE(dev->mtu, new_mtu);
+	dev->mtu = new_mtu;
 	return 0;
 }
 
@@ -7486,8 +7484,6 @@ int register_netdevice(struct net_device *dev)
 	ret = notifier_to_errno(ret);
 	if (ret) {
 		rollback_registered(dev);
-		rcu_barrier();
-
 		dev->reg_state = NETREG_UNREGISTERED;
 	}
 	/*

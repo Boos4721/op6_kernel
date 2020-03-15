@@ -117,7 +117,4 @@ struct ramoops_context {
 	struct pstore_info pstore;
 };
 
-void save_dump_reason_to_device_info(char *buf);
-void save_tz_dump_reason_to_device_info(char *buf);
-void save_modem_dump_reason_to_device_info(char *buf);
 #endif /*_LINUX_PSTORE_H*/

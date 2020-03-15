@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -107,15 +107,6 @@ struct kgsl_drawobj_sync {
 
 #define KGSL_FENCE_NAME_LEN 74
 
-struct fence_info {
-	char name[KGSL_FENCE_NAME_LEN];
-};
-
-struct event_fence_info {
-	struct fence_info *fences;
-	int num_fences;
-};
-
 /**
  * struct kgsl_drawobj_sync_event
  * @id: identifer (positiion within the pending bitmap)
@@ -125,8 +116,8 @@ struct event_fence_info {
  *           register this event
  * @timestamp: Pending timestamp for the event
  * @handle: Pointer to a sync fence handle
+ * @fence_name: A fence name string to describe the fence
  * @device: Pointer to the KGSL device
- * @info: structure to hold info about the fence
  */
 struct kgsl_drawobj_sync_event {
 	unsigned int id;
@@ -135,8 +126,8 @@ struct kgsl_drawobj_sync_event {
 	struct kgsl_context *context;
 	unsigned int timestamp;
 	struct kgsl_sync_fence_cb *handle;
+	char fence_name[KGSL_FENCE_NAME_LEN];
 	struct kgsl_device *device;
-	struct event_fence_info info;
 };
 
 /**

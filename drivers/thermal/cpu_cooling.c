@@ -339,7 +339,7 @@ static int cpufreq_thermal_notifier(struct notifier_block *nb,
 	unsigned long clipped_freq = ULONG_MAX, floor_freq = 0;
 	struct cpufreq_cooling_device *cpufreq_dev;
 
-	if (event != CPUFREQ_INCOMPATIBLE)
+	if (event != CPUFREQ_ADJUST)
 		return NOTIFY_DONE;
 
 	mutex_lock(&cooling_list_lock);
@@ -837,7 +837,7 @@ static int cpufreq_get_requested_power(struct thermal_cooling_device *cdev,
 			load = 0;
 
 		total_load += load;
-		if (load_cpu)
+		if (trace_thermal_power_cpu_limit_enabled() && load_cpu)
 			load_cpu[i] = load;
 
 		i++;

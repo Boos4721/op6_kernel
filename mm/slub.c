@@ -4681,22 +4681,6 @@ enum slab_stat_type {
 #define SO_OBJECTS	(1 << SL_OBJECTS)
 #define SO_TOTAL	(1 << SL_TOTAL)
 
-#ifdef CONFIG_MEMCG
-static bool memcg_sysfs_enabled = IS_ENABLED(CONFIG_SLUB_MEMCG_SYSFS_ON);
-
-static int __init setup_slub_memcg_sysfs(char *str)
-{
-	int v;
-
-	if (get_option(&str, &v) > 0)
-		memcg_sysfs_enabled = v;
-
-	return 1;
-}
-
-__setup("slub_memcg_sysfs=", setup_slub_memcg_sysfs);
-#endif
-
 static ssize_t show_slab_objects(struct kmem_cache *s,
 			    char *buf, unsigned long flags)
 {
@@ -4748,17 +4732,7 @@ static ssize_t show_slab_objects(struct kmem_cache *s,
 		}
 	}
 
-	/*
-	 * It is impossible to take "mem_hotplug_lock" here with "kernfs_mutex"
-	 * already held which will conflict with an existing lock order:
-	 *
-	 * mem_hotplug_lock->slab_mutex->kernfs_mutex
-	 *
-	 * We don't really need mem_hotplug_lock (to hold off
-	 * slab_mem_going_offline_callback) here because slab's memory hot
-	 * unplug code doesn't destroy the kmem_cache->node[] data.
-	 */
-
+	get_online_mems();
 #ifdef CONFIG_SLUB_DEBUG
 	if (flags & SO_ALL) {
 		struct kmem_cache_node *n;
@@ -4799,6 +4773,7 @@ static ssize_t show_slab_objects(struct kmem_cache *s,
 			x += sprintf(buf + x, " N%d=%lu",
 					node, nodes[node]);
 #endif
+	put_online_mems();
 	kfree(nodes);
 	return x + sprintf(buf + x, "\n");
 }
@@ -5611,13 +5586,7 @@ static int sysfs_slab_add(struct kmem_cache *s)
 {
 	int err;
 	const char *name;
-	struct kset *kset = cache_kset(s);
 	int unmergeable = slab_unmergeable(s);
-
-	if (!kset) {
-		kobject_init(&s->kobj, &slab_ktype);
-		return 0;
-	}
 
 	if (unmergeable) {
 		/*
@@ -5635,7 +5604,7 @@ static int sysfs_slab_add(struct kmem_cache *s)
 		name = create_unique_id(s);
 	}
 
-	s->kobj.kset = kset;
+	s->kobj.kset = cache_kset(s);
 	err = kobject_init_and_add(&s->kobj, &slab_ktype, NULL, "%s", name);
 	if (err)
 		goto out;
@@ -5645,7 +5614,7 @@ static int sysfs_slab_add(struct kmem_cache *s)
 		goto out_del_kobj;
 
 #ifdef CONFIG_MEMCG
-	if (is_root_cache(s) && memcg_sysfs_enabled) {
+	if (is_root_cache(s)) {
 		s->memcg_kset = kset_create_and_add("cgroup", NULL, &s->kobj);
 		if (!s->memcg_kset) {
 			err = -ENOMEM;

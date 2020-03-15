@@ -256,7 +256,6 @@
 		compatible = "st,stmvl53l0";
 		reg = <0x29>;
 		status = "ok";
-		tof-id = <2>;
 	};
 };
 
@@ -355,12 +354,12 @@
 	status = "ok";
 };
 
-&i2c_3 {
+&i2c_1 {
+	status = "okay";
 	vl53l0x@52 {
 		compatible = "st,stmvl53l0";
 		reg = <0x29>;
 		status = "ok";
-		tof-id = <1>;
 	};
 };
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -274,6 +274,9 @@
 &vendor {
 	mtp_batterydata: qcom,battery-data {
 		qcom,batt-id-range-pct = <15>;
+		#include "fg-gen3-batterydata-itech-3000mah.dtsi"
+		#include "fg-gen3-batterydata-ascent-3450mah.dtsi"
+		#include "fg-gen3-batterydata-demo-6000mah.dtsi"
 	};
 
 	extcon_usb1: extcon_usb1 {
@@ -473,7 +476,6 @@
 		polling-delay-passive = <0>;
 		polling-delay = <0>;
 		thermal-sensors = <&pm8998_adc_tm 0x4c>;
-		wake-capable-sensor;
 		thermal-governor = "user_space";
 
 		trips {
@@ -489,7 +491,6 @@
 		polling-delay-passive = <0>;
 		polling-delay = <0>;
 		thermal-sensors = <&pm8998_adc_tm 0x4d>;
-		wake-capable-sensor;
 		thermal-governor = "user_space";
 
 		trips {
@@ -505,7 +506,6 @@
 		polling-delay-passive = <0>;
 		polling-delay = <0>;
 		thermal-sensors = <&pm8998_adc_tm 0x4f>;
-		wake-capable-sensor;
 		thermal-governor = "user_space";
 
 		trips {
@@ -521,7 +521,6 @@
 		polling-delay-passive = <0>;
 		polling-delay = <0>;
 		thermal-sensors = <&pm8998_adc_tm 0x51>;
-		wake-capable-sensor;
 		thermal-governor = "user_space";
 
 		trips {

@@ -974,9 +974,6 @@ struct adm_cmd_connect_afe_port_v5 {
 #define INT_FM_TX 0x3005
 #define RT_PROXY_PORT_001_RX	0x2000
 #define RT_PROXY_PORT_001_TX	0x2001
-//MM.Audio, 2019/07/13, add for screen record headset mic path
-#define AFE_LOOPBACK_TX	0x6001
-//end add
 #define DISPLAY_PORT_RX	0x6020
 
 #define AFE_PORT_INVALID 0xFFFF
@@ -3141,10 +3138,6 @@ struct afe_abr_enc_cfg_t {
 	 * Information to set up IMC between decoder and encoder.
 	 */
 	struct afe_imc_dec_enc_info imc_info;
-	/*
-	 * Flag to indicate whether ABR is enabled.
-	 */
-	bool is_abr_enabled;
 } __packed;
 
 #define AFE_PARAM_ID_APTX_SYNC_MODE  0x00013205
@@ -3235,12 +3228,6 @@ struct afe_param_id_aptx_sync_mode {
  * is transmitted/received over Slimbus lines.
  */
 #define AFE_SB_DATA_FORMAT_GENERIC_COMPRESSED    0x3
-
-/*
- * Parameter to send frame control size
- * to DSP for AAC encoder in AFE.
- */
-#define AFE_PARAM_ID_AAC_FRM_SIZE_CONTROL 0x000132EA
 
 /*
  * ID for AFE port module. This will be used to define port properties.
@@ -3410,23 +3397,6 @@ struct asm_aac_enc_cfg_v2_t {
 	 * The sampling rate must not change during encoding.
 	 */
 	uint32_t     sample_rate;
-} __packed;
-
-/* Structure to control frame size of AAC encoded frames. */
-struct asm_aac_frame_size_control_t {
-	/* Type of frame size control: MTU_SIZE / PEAK_BIT_RATE*/
-	uint32_t ctl_type;
-	/*
-	 * Control value
-	 * MTU_SIZE: MTU size in bytes
-	 * PEAK_BIT_RATE: Peak bitrate in bits per second.
-	 */
-	uint32_t ctl_value;
-} __packed;
-
-struct asm_aac_enc_cfg_t {
-	struct asm_aac_enc_cfg_v2_t aac_cfg;
-	struct asm_aac_frame_size_control_t frame_ctl;
 } __packed;
 
 /* FMT ID for apt-X Classic */
@@ -3623,7 +3593,7 @@ struct afe_port_media_type_t {
 
 union afe_enc_config_data {
 	struct asm_sbc_enc_cfg_t sbc_config;
-	struct asm_aac_enc_cfg_t aac_config;
+	struct asm_aac_enc_cfg_v2_t aac_config;
 	struct asm_custom_enc_cfg_t  custom_config;
 	struct asm_celt_enc_cfg_t  celt_config;
 	struct asm_aptx_enc_cfg_t  aptx_config;
@@ -3720,7 +3690,6 @@ union afe_port_config {
 	struct afe_param_id_tdm_cfg               tdm;
 	struct afe_param_id_usb_audio_cfg         usb_audio;
 	struct afe_param_id_aptx_sync_mode        sync_mode_param;
-	struct asm_aac_frame_size_control_t       frame_ctl_param;
 	struct afe_enc_fmt_id_param_t             enc_fmt;
 	struct afe_port_media_type_t              media_type;
 	struct afe_enc_cfg_blk_param_t            enc_blk_param;
@@ -10137,7 +10106,7 @@ struct afe_clk_set {
 	 * for enable and disable clock.
 	 *	"clk_freq_in_hz", "clk_attri", and "clk_root"
 	 *	are ignored in disable clock case.
-	 *	@values 
+	 *	@values 
 	 *	- 0 -- Disabled
 	 *	- 1 -- Enabled  @tablebulletend
 	 */

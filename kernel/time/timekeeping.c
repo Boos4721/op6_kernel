@@ -15,7 +15,6 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
-#include <linux/sched/loadavg.h>
 #include <linux/syscore_ops.h>
 #include <linux/clocksource.h>
 #include <linux/jiffies.h>
@@ -1735,17 +1734,16 @@ void timekeeping_resume(void)
 		nsec += ((u64) cycle_delta * mult) >> shift;
 
 		ts_delta = ns_to_timespec64(nsec);
-		inject_sleeptime = true;
+		inject_sleeptime  = true;
 	} else if (timespec64_compare(&ts_new, &timekeeping_suspend_time) > 0) {
 		ts_delta = timespec64_sub(ts_new, timekeeping_suspend_time);
-		inject_sleeptime = true;
+		inject_sleeptime  = true;
 	}
 
 	if (inject_sleeptime) {
 		suspend_timing_needed = false;
 		__timekeeping_inject_sleeptime(tk, &ts_delta);
 	}
-
 	/* Re-base the last cycle value */
 	tk->tkr_mono.cycle_last = cycle_now;
 	tk->tkr_raw.cycle_last  = cycle_now;
@@ -1780,7 +1778,6 @@ int timekeeping_suspend(void)
 		persistent_clock_exists = true;
 
 	suspend_timing_needed = true;
-
 	raw_spin_lock_irqsave(&timekeeper_lock, flags);
 	write_seqcount_begin(&tk_core.seq);
 	timekeeping_forward_now(tk);

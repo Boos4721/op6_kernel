@@ -33,7 +33,6 @@ enum {
 	MSM_DRM_BLANK_POWERDOWN_CUST,
 
 	MSM_DRM_ONSCREENFINGERPRINT_EVENT,
-	/*#endif*/
 };
 
 enum msm_drm_display_id {

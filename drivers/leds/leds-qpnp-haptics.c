@@ -381,8 +381,6 @@ struct hap_chip {
 	u32				min_time_strong;
 };
 
-struct hap_chip *gchip;
-
 static int qpnp_haptics_parse_buffer_dt(struct hap_chip *chip);
 static int qpnp_haptics_parse_pwm_dt(struct hap_chip *chip);
 
@@ -727,6 +725,8 @@ static int qpnp_haptics_play_control(struct hap_chip *chip,
 static int qpnp_haptics_play(struct hap_chip *chip, bool enable)
 {
 	int rc = 0, time_ms = chip->play_time_ms;
+
+    pr_err(" enable=%d time_ms=%d\n" ,enable, time_ms);
 
 	if (chip->perm_disable && enable)
 		return 0;
@@ -1385,35 +1385,6 @@ static int qpnp_haptics_auto_mode_config(struct hap_chip *chip, int time_ms)
 
 	return 0;
 }
-
-void set_vibrate(int val)
-{
-	int rc;
-
-	if (val > gchip->max_play_time_ms)
-		return;
-
-	mutex_lock(&gchip->param_lock);
-	rc = qpnp_haptics_auto_mode_config(gchip, val);
-	if (rc < 0) {
-		pr_err("Unable to do auto mode config\n");
-		mutex_unlock(&gchip->param_lock);
-		return;
-	}
-
-	gchip->play_time_ms = val;
-	mutex_unlock(&gchip->param_lock);
-
-	hrtimer_cancel(&gchip->stop_timer);
-	if (is_sw_lra_auto_resonance_control(gchip))
-		hrtimer_cancel(&gchip->auto_res_err_poll_timer);
-	cancel_work_sync(&gchip->haptics_work);
-
-	atomic_set(&gchip->state, 1);
-	schedule_work(&gchip->haptics_work);
-
-}
-
 /* sysfs show debug registers */
 static ssize_t qpnp_hap_dump_regs_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -1658,6 +1629,11 @@ static ssize_t qpnp_haptics_store_activate(struct device *dev,
 
 	if (chip->vmax_mv <= HAP_VMAX_MIN_MV && (val != 0))
 		return count;
+
+	if ((ignore_next_request) && (val != 0)) {
+		ignore_next_request = 0;
+		return count;
+	}
 
 	if (val) {
 		hrtimer_cancel(&chip->stop_timer);
@@ -2806,9 +2782,6 @@ static int qpnp_haptics_probe(struct platform_device *pdev)
 		}
 	}
 		pr_info("qpnp_haptics_probe done\n");
-
-	gchip = chip;
-
 	return 0;
 
 sysfs_fail:
@@ -2844,16 +2817,6 @@ static int qpnp_haptics_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static void qpnp_haptics_shutdown(struct platform_device *pdev)
-{
-	struct hap_chip *chip = dev_get_drvdata(&pdev->dev);
-
-	cancel_work_sync(&chip->haptics_work);
-
-	/* disable haptics */
-	qpnp_haptics_mod_enable(chip, false);
-}
-
 static const struct dev_pm_ops qpnp_haptics_pm_ops = {
 	.suspend	= qpnp_haptics_suspend,
 };
@@ -2871,7 +2834,6 @@ static struct platform_driver qpnp_haptics_driver = {
 	},
 	.probe		= qpnp_haptics_probe,
 	.remove		= qpnp_haptics_remove,
-	.shutdown	= qpnp_haptics_shutdown,
 };
 module_platform_driver(qpnp_haptics_driver);
 

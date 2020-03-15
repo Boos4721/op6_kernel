@@ -37,7 +37,6 @@ static struct list_head    ordered_sd_list;
 static struct mutex        ordered_sd_mtx;
 static struct mutex        v4l2_event_mtx;
 
-static atomic_t qos_add_request_done = ATOMIC_INIT(0);
 static struct pm_qos_request msm_v4l2_pm_qos_request;
 
 static struct msm_queue_head *msm_session_q;
@@ -224,11 +223,9 @@ static inline int __msm_queue_find_command_ack_q(void *d1, void *d2)
 	return (ack->stream_id == *(unsigned int *)d2) ? 1 : 0;
 }
 
-static inline void msm_pm_qos_add_request(void)
+static void msm_pm_qos_add_request(void)
 {
 	pr_info("%s: add request", __func__);
-	if (atomic_cmpxchg(&qos_add_request_done, 0, 1))
-		return;
 	pm_qos_add_request(&msm_v4l2_pm_qos_request, PM_QOS_CPU_DMA_LATENCY,
 	PM_QOS_DEFAULT_VALUE);
 }
@@ -241,14 +238,8 @@ static void msm_pm_qos_remove_request(void)
 
 void msm_pm_qos_update_request(int val)
 {
-	/* update just before creating the first session,
-	 * or after destroying the last session.
-	 */
-	if (msm_session_q && msm_session_q->len == 0) {
-		pr_info("%s: update request %d", __func__, val);
-		msm_pm_qos_add_request();
-		pm_qos_update_request(&msm_v4l2_pm_qos_request, val);
-	}
+	pr_info("%s: update request %d", __func__, val);
+	pm_qos_update_request(&msm_v4l2_pm_qos_request, val);
 }
 
 struct msm_session *msm_session_find(unsigned int session_id)
@@ -636,6 +627,9 @@ static inline int __msm_remove_session_cmd_ack_q(void *d1, void *d2)
 {
 	struct msm_command_ack *cmd_ack = d1;
 
+	if (!(&cmd_ack->command_q))
+		return 0;
+
 	msm_queue_drain(&cmd_ack->command_q, struct msm_command, list);
 
 	return 0;
@@ -643,7 +637,7 @@ static inline int __msm_remove_session_cmd_ack_q(void *d1, void *d2)
 
 static void msm_remove_session_cmd_ack_q(struct msm_session *session)
 {
-	if (!session)
+	if ((!session) || !(&session->command_ack_q))
 		return;
 
 	mutex_lock(&session->lock);

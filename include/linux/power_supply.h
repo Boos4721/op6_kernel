@@ -140,7 +140,6 @@ enum {
 enum power_supply_property {
 	/* Properties of type `int' */
 	POWER_SUPPLY_PROP_STATUS = 0,
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	POWER_SUPPLY_PROP_SET_ALLOW_READ_EXTERN_FG_IIC,
 	POWER_SUPPLY_PROP_CC_TO_CV_POINT,
 	POWER_SUPPLY_PROP_CHG_PROTECT_STATUS,
@@ -324,10 +323,6 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_ESR_NOMINAL,
 	POWER_SUPPLY_PROP_SOH,
 	POWER_SUPPLY_PROP_QC_OPTI_DISABLE,
-	POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE,
-	POWER_SUPPLY_PROP_CC_SOC,
-	POWER_SUPPLY_PROP_QG_VBMS_MODE,
-	POWER_SUPPLY_PROP_REAL_CAPACITY,
 	/* Local extensions of type int64_t */
 	POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT,
 	/* Properties of type `const char *' */
@@ -336,6 +331,7 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
 	POWER_SUPPLY_PROP_BATTERY_TYPE,
 	POWER_SUPPLY_PROP_CYCLE_COUNTS,
+	POWER_SUPPLY_PROP_MAX
 };
 
 enum power_supply_type {
@@ -359,7 +355,6 @@ enum power_supply_type {
 	POWER_SUPPLY_TYPE_TYPEC,	/* Type-C */
 	POWER_SUPPLY_TYPE_UFP,		/* Type-C UFP */
 	POWER_SUPPLY_TYPE_DFP,		/* TYpe-C DFP */
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	POWER_SUPPLY_TYPE_DASH,
 };
 

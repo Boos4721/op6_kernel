@@ -694,7 +694,6 @@ static int ffs_ep0_open(struct inode *inode, struct file *file)
 
 	/* to get updated opened atomic variable value */
 	smp_mb__before_atomic();
-/* xianglin@bsp, 20170104 Add log to check ep0 status */
 	if (atomic_read(&ffs->opened)) {
 		pr_err("ep0 is already opened!\n");
 		return -EBUSY;
@@ -1205,12 +1204,9 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 			 */
 			if (epfile->ep == ep) {
 				usb_ep_dequeue(ep->ep, req);
-				spin_unlock_irq(&epfile->ffs->eps_lock);
-				wait_for_completion(done);
 				interrupted = ep->status < 0;
-			} else {
-				spin_unlock_irq(&epfile->ffs->eps_lock);
 			}
+			spin_unlock_irq(&epfile->ffs->eps_lock);
 		}
 
 		if (interrupted) {
@@ -1334,19 +1330,21 @@ static int ffs_aio_cancel(struct kiocb *kiocb)
 {
 	struct ffs_io_data *io_data = kiocb->private;
 	struct ffs_epfile *epfile = kiocb->ki_filp->private_data;
-	unsigned long flags;
 	int value;
 
 	ENTER();
 
-	spin_lock_irqsave(&epfile->ffs->eps_lock, flags);
+	ffs_log("enter:state %d setup_state %d flag %lu", epfile->ffs->state,
+		epfile->ffs->setup_state, epfile->ffs->flags);
+
+	spin_lock_irq(&epfile->ffs->eps_lock);
 
 	if (likely(io_data && io_data->ep && io_data->req))
 		value = usb_ep_dequeue(io_data->ep, io_data->req);
 	else
 		value = -EINVAL;
 
-	spin_unlock_irqrestore(&epfile->ffs->eps_lock, flags);
+	spin_unlock_irq(&epfile->ffs->eps_lock);
 
 	ffs_log("exit: value %d", value);
 

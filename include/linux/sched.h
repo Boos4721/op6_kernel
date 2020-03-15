@@ -58,6 +58,7 @@ struct sched_param {
 #include <linux/uidgid.h>
 #include <linux/gfp.h>
 #include <linux/magic.h>
+#include <linux/cgroup-defs.h>
 
 #include <asm/processor.h>
 
@@ -137,6 +138,31 @@ struct nameidata;
 #define VMACACHE_BITS 2
 #define VMACACHE_SIZE (1U << VMACACHE_BITS)
 #define VMACACHE_MASK (VMACACHE_SIZE - 1)
+
+/*
+ * These are the constant used to fake the fixed-point load-average
+ * counting. Some notes:
+ *  - 11 bit fractions expand to 22 bits by the multiplies: this gives
+ *    a load-average precision of 10 bits integer + 11 bits fractional
+ *  - if you want to count load-averages more often, you need more
+ *    precision, or rounding will get you. With 2-second counting freq,
+ *    the EXP_n values would be 1981, 2034 and 2043 if still using only
+ *    11 bit fractions.
+ */
+extern unsigned long avenrun[];		/* Load averages */
+extern void get_avenrun(unsigned long *loads, unsigned long offset, int shift);
+
+#define FSHIFT		11		/* nr of bits of precision */
+#define FIXED_1		(1<<FSHIFT)	/* 1.0 as fixed-point */
+#define LOAD_FREQ	(5*HZ+1)	/* 5 sec intervals */
+#define EXP_1		1884		/* 1/exp(5sec/1min) as fixed-point */
+#define EXP_5		2014		/* 1/exp(5sec/5min) */
+#define EXP_15		2037		/* 1/exp(5sec/15min) */
+
+#define CALC_LOAD(load,exp,n) \
+	load *= exp; \
+	load += n*(FIXED_1-exp); \
+	load >>= FSHIFT;
 
 extern unsigned long total_forks;
 extern int nr_threads;
@@ -545,7 +571,6 @@ extern unsigned long
 arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
 			  unsigned long len, unsigned long pgoff,
 			  unsigned long flags);
-extern void special_arch_pick_mmap_layout(struct mm_struct *mm);
 #else
 static inline void arch_pick_mmap_layout(struct mm_struct *mm) {}
 #endif
@@ -889,12 +914,6 @@ struct signal_struct {
 	 * oom
 	 */
 	bool oom_flag_origin;
-#ifdef CONFIG_MEMPLUS
-	spinlock_t reclaim_state_lock;
-	unsigned long reclaim_timeout;
-	int swapin_should_readahead_m;
-	int memplus_type;
-#endif
 	short oom_score_adj;		/* OOM kill score adjustment */
 	short oom_score_adj_min;	/* OOM kill score adjustment min value.
 					 * Only settable by CAP_SYS_RESOURCE. */
@@ -1001,7 +1020,39 @@ struct sched_info {
 };
 #endif /* CONFIG_SCHED_INFO */
 
-struct task_delay_info;
+#ifdef CONFIG_TASK_DELAY_ACCT
+struct task_delay_info {
+	spinlock_t	lock;
+	unsigned int	flags;	/* Private per-task flags */
+
+	/* For each stat XXX, add following, aligned appropriately
+	 *
+	 * struct timespec XXX_start, XXX_end;
+	 * u64 XXX_delay;
+	 * u32 XXX_count;
+	 *
+	 * Atomicity of updates to XXX_delay, XXX_count protected by
+	 * single lock above (split into XXX_lock if contention is an issue).
+	 */
+
+	/*
+	 * XXX_count is incremented on every XXX operation, the delay
+	 * associated with the operation is added to XXX_delay.
+	 * XXX_delay contains the accumulated delay time in nanoseconds.
+	 */
+	u64 blkio_start;	/* Shared by blkio, swapin */
+	u64 blkio_delay;	/* wait for sync block io completion */
+	u64 swapin_delay;	/* wait for swapin block io completion */
+	u32 blkio_count;	/* total count of the number of sync block */
+				/* io operations performed */
+	u32 swapin_count;	/* total count of the number of swapin block */
+				/* io operations performed */
+
+	u64 freepages_start;
+	u64 freepages_delay;	/* wait for memory reclaim */
+	u32 freepages_count;	/* total count of memory reclaim */
+};
+#endif	/* CONFIG_TASK_DELAY_ACCT */
 
 static inline int sched_info_on(void)
 {
@@ -1715,15 +1766,12 @@ struct task_struct {
 	atomic_t usage;
 	unsigned int flags;	/* per process flags, defined below */
 	unsigned int ptrace;
-	//huruihuan add for kill task in D status
 	unsigned int kill_flag;
 	struct timespec ttu;
 	int compensate_time;
 	int compensate_need;
-	unsigned int inode_index_disabled;
 
-	//Display, add for fd leak debug
-	bool dump_fd_leak;
+    bool dump_fd_leak;
 
 #ifdef CONFIG_SMP
 	struct llist_node wake_entry;
@@ -1831,10 +1879,6 @@ struct task_struct {
 	unsigned sched_contributes_to_load:1;
 	unsigned sched_migrated:1;
 	unsigned sched_remote_wakeup:1;
-#ifdef CONFIG_PSI
-	unsigned			sched_psi_wake_requeue:1;
-#endif
-
 	unsigned :0; /* force alignment to the next boundary */
 
 	/* unserialized, strictly 'current' */
@@ -2052,10 +2096,6 @@ struct task_struct {
 	unsigned long ptrace_message;
 	siginfo_t *last_siginfo; /* For ptrace use.  */
 	struct task_io_accounting ioac;
-#ifdef CONFIG_PSI
-	/* Pressure stall state */
-	unsigned int			psi_flags;
-#endif
 #if defined(CONFIG_TASK_XACCT)
 	u64 acct_rss_mem1;	/* accumulated rss usage */
 	u64 acct_vm_mem1;	/* accumulated virtual memory usage */
@@ -2149,10 +2189,9 @@ struct task_struct {
 
 	struct page_frag task_frag;
 
-#ifdef CONFIG_TASK_DELAY_ACCT
-	struct task_delay_info		*delays;
+#ifdef	CONFIG_TASK_DELAY_ACCT
+	struct task_delay_info *delays;
 #endif
-
 #ifdef CONFIG_FAULT_INJECTION
 	int make_it_fail;
 #endif
@@ -2238,7 +2277,6 @@ struct task_struct {
 	/* A live task holds one reference. */
 	atomic_t stack_refcount;
 #endif
-	/* Curtis, 20180109, opchain*/
 	u64 utask_tag;
 	u64 utask_tag_base;
 	int etask_claim;
@@ -2246,11 +2284,7 @@ struct task_struct {
 	bool utask_slave;
 	/* Ted, 20180425, non-exist dcache*/
 	struct nedf_node *nn;
-
-#ifdef CONFIG_SMART_BOOST
 	int hot_count;
-#endif
-
 /* CPU-specific state of this task */
 	struct thread_struct thread;
 /*
@@ -2576,7 +2610,6 @@ extern void thread_group_cputime_adjusted(struct task_struct *p, cputime_t *ut, 
 #define PF_KTHREAD	0x00200000	/* I am a kernel thread */
 #define PF_RANDOMIZE	0x00400000	/* randomize virtual address space */
 #define PF_SWAPWRITE	0x00800000	/* Allowed to write to swap */
-#define PF_MEMSTALL	0x01000000	/* Stalled due to lack of memory */
 #define PF_NO_SETAFFINITY 0x04000000	/* Userland is not allowed to meddle with cpus_allowed */
 #define PF_MCE_EARLY    0x08000000      /* Early kill for mce process policy */
 #define PF_MUTEX_TESTER	0x20000000	/* Thread belongs to the rt mutex tester */
@@ -3073,6 +3106,8 @@ extern void sched_exit(struct task_struct *p);
 #else
 static inline void sched_exit(struct task_struct *p) { }
 #endif
+
+
 extern void proc_caches_init(void);
 extern void flush_signals(struct task_struct *);
 extern void ignore_signals(struct task_struct *);
@@ -3502,7 +3537,11 @@ static inline void unlock_task_sighand(struct task_struct *tsk,
  * subsystems needing threadgroup stability can hook into for
  * synchronization.
  */
-extern void threadgroup_change_begin(struct task_struct *tsk);
+static inline void threadgroup_change_begin(struct task_struct *tsk)
+{
+	might_sleep();
+	cgroup_threadgroup_change_begin(tsk);
+}
 
 /**
  * threadgroup_change_end - mark the end of changes to a threadgroup
@@ -3510,7 +3549,10 @@ extern void threadgroup_change_begin(struct task_struct *tsk);
  *
  * See threadgroup_change_begin().
  */
-extern void threadgroup_change_end(struct task_struct *tsk);
+static inline void threadgroup_change_end(struct task_struct *tsk)
+{
+	cgroup_threadgroup_change_end(tsk);
+}
 
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 
@@ -3993,7 +4035,7 @@ static inline unsigned long rlimit_max(unsigned int limit)
 #define SCHED_CPUFREQ_DL	(1U << 1)
 #define SCHED_CPUFREQ_IOWAIT	(1U << 2)
 #define SCHED_CPUFREQ_INTERCLUSTER_MIG (1U << 3)
-#define SCHED_CPUFREQ_WALT (1U << 4)
+#define SCHED_CPUFREQ_RESERVED (1U << 4)
 #define SCHED_CPUFREQ_PL	(1U << 5)
 #define SCHED_CPUFREQ_EARLY_DET	(1U << 6)
 #define SCHED_CPUFREQ_FORCE_UPDATE (1U << 7)
@@ -4010,6 +4052,12 @@ void cpufreq_add_update_util_hook(int cpu, struct update_util_data *data,
 				    unsigned int flags));
 void cpufreq_remove_update_util_hook(int cpu);
 #endif /* CONFIG_CPU_FREQ */
+
+#ifdef CONFIG_DYNAMIC_STUNE_BOOST
+int do_stune_boost(char *st_name, int boost, int *slot);
+int do_stune_sched_boost(char *st_name, int *slot);
+int reset_stune_boost(char *st_name, int slot);
+#endif /* CONFIG_DYNAMIC_STUNE_BOOST */
 
 extern DEFINE_PER_CPU_READ_MOSTLY(int, sched_load_boost);
 

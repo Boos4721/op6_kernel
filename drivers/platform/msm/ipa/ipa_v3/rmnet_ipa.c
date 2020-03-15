@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -53,7 +53,6 @@
 
 #define IPA_WWAN_DEV_NAME "rmnet_ipa%d"
 #define IPA_UPSTEAM_WLAN_IFACE_NAME "wlan0"
-#define IPA_UPSTEAM_WLAN1_IFACE_NAME "wlan1"
 
 #define IPA_WWAN_RX_SOFTIRQ_THRESH 16
 
@@ -728,8 +727,7 @@ static int ipa3_wwan_add_ul_flt_rule_to_ipa(void)
 		retval = -EFAULT;
 	}
 
-	req->install_status = (enum ipa_qmi_result_type_v01)
-							QMI_RESULT_SUCCESS_V01;
+	req->install_status = QMI_RESULT_SUCCESS_V01;
 	req->rule_id_valid = 1;
 	req->rule_id_len = rmnet_ipa3_ctx->num_q6_rules;
 	for (i = 0; i < rmnet_ipa3_ctx->num_q6_rules; i++) {
@@ -822,8 +820,7 @@ static enum ipa_upstream_type find_upstream_type(const char *upstreamIface)
 			return IPA_UPSTEAM_MODEM;
 	}
 
-	if ((strcmp(IPA_UPSTEAM_WLAN_IFACE_NAME, upstreamIface) == 0) ||
-		(strcmp(IPA_UPSTEAM_WLAN1_IFACE_NAME, upstreamIface) == 0))
+	if (strcmp(IPA_UPSTEAM_WLAN_IFACE_NAME, upstreamIface) == 0)
 		return IPA_UPSTEAM_WLAN;
 	else
 		return MAX_NUM_OF_MUX_CHANNEL;
@@ -1076,12 +1073,8 @@ static int __ipa_wwan_close(struct net_device *dev)
  */
 static int ipa3_wwan_stop(struct net_device *dev)
 {
-	struct ipa3_wwan_private *wwan_ptr = netdev_priv(dev);
-
 	IPAWANDBG("[%s] ipa3_wwan_stop()\n", dev->name);
 	__ipa_wwan_close(dev);
-	if (ipa3_rmnet_res.ipa_napi_enable)
-		napi_disable(&(wwan_ptr->napi));
 	netif_stop_queue(dev);
 	return 0;
 }
@@ -2603,9 +2596,6 @@ static int rmnet_ipa_ap_suspend(struct device *dev)
 
 	/* Make sure that there is no Tx operation ongoing */
 	netif_stop_queue(netdev);
-	/* Stoppig Watch dog timer when pipe was in suspend state */
-	if (del_timer(&netdev->watchdog_timer))
-		dev_put(netdev);
 	netif_tx_unlock_bh(netdev);
 	if (ipa3_ctx->use_ipa_pm)
 		ipa_pm_deactivate_sync(rmnet_ipa3_ctx->pm_hdl);
@@ -2632,12 +2622,8 @@ static int rmnet_ipa_ap_resume(struct device *dev)
 	struct net_device *netdev = IPA_NETDEV();
 
 	IPAWANDBG("Enter...\n");
-	if (netdev) {
+	if (netdev)
 		netif_wake_queue(netdev);
-		/* Starting Watch dog timer, pipe was changes to resume state */
-		if (netif_running(netdev) && netdev->watchdog_timeo <= 0)
-			__netdev_watchdog_up(netdev);
-	}
 	IPAWANDBG("Exit\n");
 
 	return 0;
@@ -2844,8 +2830,7 @@ static void tethering_stats_poll_queue(struct work_struct *work)
 
 	/* Schedule again only if there's an active polling interval */
 	if (ipa3_rmnet_ctx.polling_interval != 0)
-		queue_delayed_work(system_power_efficient_wq, 
-			&ipa_tether_stats_poll_wakequeue_work,
+		schedule_delayed_work(&ipa_tether_stats_poll_wakequeue_work,
 			msecs_to_jiffies(ipa3_rmnet_ctx.polling_interval*1000));
 }
 
@@ -2939,8 +2924,7 @@ int rmnet_ipa3_poll_tethering_stats(struct wan_ioctl_poll_tethering_stats *data)
 		return 0;
 	}
 
-	queue_delayed_work(system_power_efficient_wq, 
-						&ipa_tether_stats_poll_wakequeue_work, 0);
+	schedule_delayed_work(&ipa_tether_stats_poll_wakequeue_work, 0);
 	return 0;
 }
 
@@ -3138,7 +3122,7 @@ static int rmnet_ipa3_query_tethering_stats_wifi(
 
 	rc = ipa3_get_wlan_stats(sap_stats);
 	if (rc) {
-		IPAWANERR_RL("can't get ipa3_get_wlan_stats\n");
+		IPAWANERR("can't get ipa3_get_wlan_stats\n");
 		kfree(sap_stats);
 		return rc;
 	} else if (data == NULL) {
@@ -3471,7 +3455,7 @@ int rmnet_ipa3_query_tethering_stats(struct wan_ioctl_query_tether_stats *data,
 			return rc;
 		}
 	} else {
-		IPAWANDBG_LOW("query modem-backhaul stats\n");
+		IPAWANDBG_LOW(" query modem-backhaul stats\n");
 		rc = rmnet_ipa3_query_tethering_stats_modem(
 			data, false);
 		if (rc) {
@@ -3505,8 +3489,7 @@ int rmnet_ipa3_query_tethering_stats_all(
 		rc = rmnet_ipa3_query_tethering_stats_wifi(
 			&tether_stats, data->reset_stats);
 		if (rc) {
-			IPAWANERR_RL(
-				"wlan WAN_IOC_QUERY_TETHER_STATS failed\n");
+			IPAWANERR("wlan WAN_IOC_QUERY_TETHER_STATS failed\n");
 			return rc;
 		}
 		data->tx_bytes = tether_stats.ipv4_tx_bytes
@@ -3738,17 +3721,6 @@ static inline int rmnet_ipa3_delete_lan_client_info
 	struct ipa_lan_client *lan_client = NULL;
 	int i;
 
-	IPAWANDBG("Delete lan client info: %d, %d, %d\n",
-		rmnet_ipa3_ctx->tether_device[device_type].num_clients,
-		lan_clnt_idx, device_type);
-	/* Check if Device type is valid. */
-
-	if (device_type >= IPACM_MAX_CLIENT_DEVICE_TYPES ||
-		device_type < 0) {
-		IPAWANERR("Invalid Device type: %d\n", device_type);
-		return -EINVAL;
-	}
-
 	/* Check if the request is to clean up all clients. */
 	if (lan_clnt_idx == 0xffffffff) {
 		/* Reset the complete device info. */
@@ -3765,8 +3737,6 @@ static inline int rmnet_ipa3_delete_lan_client_info
 		/* Reset the client info before sending the message. */
 		memset(lan_client, 0, sizeof(struct ipa_lan_client));
 		lan_client->client_idx = -1;
-		/* Decrement the number of clients. */
-		rmnet_ipa3_ctx->tether_device[device_type].num_clients--;
 
 	}
 	return 0;
@@ -3887,10 +3857,6 @@ int rmnet_ipa3_clear_lan_client_info(
 		return -EINVAL;
 	}
 
-	IPAWANDBG("Client : %d:%d:%d\n",
-		data->device_type, data->client_idx,
-		rmnet_ipa3_ctx->tether_device[data->device_type].num_clients);
-
 	mutex_lock(&rmnet_ipa3_ctx->per_client_stats_guard);
 	lan_client =
 	&rmnet_ipa3_ctx->tether_device[data->device_type].
@@ -3937,15 +3903,6 @@ int rmnet_ipa3_send_lan_client_msg(
 		IPAWANERR("Can't allocate memory for tether_info\n");
 		return -ENOMEM;
 	}
-
-	if (data->client_event != IPA_PER_CLIENT_STATS_CONNECT_EVENT &&
-		data->client_event != IPA_PER_CLIENT_STATS_DISCONNECT_EVENT) {
-		IPAWANERR("Wrong event given. Event:- %d\n",
-			data->client_event);
-		kfree(lan_client);
-		return -EINVAL;
-	}
-	data->lan_client.lanIface[IPA_RESOURCE_NAME_MAX-1] = '\0';
 	memset(&msg_meta, 0, sizeof(struct ipa_msg_meta));
 	memcpy(lan_client, &data->lan_client,
 		sizeof(struct ipa_lan_client_msg));
@@ -4049,21 +4006,6 @@ int rmnet_ipa3_query_per_client_stats(
 
 	mutex_lock(&rmnet_ipa3_ctx->per_client_stats_guard);
 
-	/* Check if Source pipe is valid. */
-	if (rmnet_ipa3_ctx->tether_device
-		[data->device_type].ul_src_pipe == -1) {
-		IPAWANERR("Device not initialized: %d\n", data->device_type);
-		mutex_unlock(&rmnet_ipa3_ctx->per_client_stats_guard);
-		return -EINVAL;
-	}
-
-	/* Check if we have clients connected. */
-	if (rmnet_ipa3_ctx->tether_device[data->device_type].num_clients == 0) {
-		IPAWANERR("No clients connected: %d\n", data->device_type);
-		mutex_unlock(&rmnet_ipa3_ctx->per_client_stats_guard);
-		return -EINVAL;
-	}
-
 	if (data->num_clients == 1) {
 		/* Check if the client info is valid.*/
 		lan_clnt_idx1 = rmnet_ipa3_get_lan_client_info(
@@ -4119,9 +4061,6 @@ int rmnet_ipa3_query_per_client_stats(
 	}
 	memset(req, 0, sizeof(struct ipa_get_stats_per_client_req_msg_v01));
 	memset(resp, 0, sizeof(struct ipa_get_stats_per_client_resp_msg_v01));
-
-	IPAWANDBG("Reset stats: %s",
-		data->reset_stats?"Yes":"No");
 
 	if (data->reset_stats) {
 		req->reset_stats_valid = true;
@@ -4193,9 +4132,6 @@ int rmnet_ipa3_query_per_client_stats(
 				IPA_MAC_ADDR_SIZE);
 		}
 	}
-
-	IPAWANDBG("Disconnect clnt: %s",
-		data->disconnect_clnt?"Yes":"No");
 
 	if (data->disconnect_clnt) {
 		rmnet_ipa3_delete_lan_client_info(data->device_type,

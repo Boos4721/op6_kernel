@@ -47,10 +47,8 @@ static ssize_t power_supply_show_property(struct device *dev,
 		"Unknown", "Battery", "UPS", "Mains", "USB", "USB_DCP",
 		"USB_CDP", "USB_ACA", "USB_HVDCP", "USB_HVDCP_3", "USB_PD",
 		"Wireless", "USB_FLOAT", "BMS", "Parallel", "Main", "Wipower",
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 		"TYPEC", "TYPEC_UFP", "TYPEC_DFP", "DASH"
 	};
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	static const char *const cc_orientation_text[] = {
 		"Unknown", "cc1", "cc2"
 	};
@@ -103,8 +101,7 @@ static ssize_t power_supply_show_property(struct device *dev,
 				dev_dbg(dev, "driver has no data for `%s' property\n",
 					attr->attr.name);
 			else if (ret != -ENODEV && ret != -EAGAIN)
-				dev_err_ratelimited(dev,
-					"driver failed to report `%s' property: %zd\n",
+				dev_err(dev, "driver failed to report `%s' property: %zd\n",
 					attr->attr.name, ret);
 			return ret;
 		}
@@ -138,7 +135,6 @@ static ssize_t power_supply_show_property(struct device *dev,
 	else if (off == POWER_SUPPLY_PROP_TYPEC_POWER_ROLE)
 		return scnprintf(buf, PAGE_SIZE, "%s\n",
 				typec_pr_text[value.intval]);
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	else if (off == POWER_SUPPLY_PROP_OEM_TYPEC_CC_ORIENTATION)
 		return snprintf(
 		buf, 255, "%s\n",
@@ -188,7 +184,6 @@ static ssize_t power_supply_store_property(struct device *dev,
 static struct device_attribute power_supply_attrs[] = {
 	/* Properties of type `int' */
 	POWER_SUPPLY_ATTR(status),
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	POWER_SUPPLY_ATTR(set_allow_read_extern_fg_iic),
 	POWER_SUPPLY_ATTR(cc_to_cv_point),
 	POWER_SUPPLY_ATTR(chg_protect_status),
@@ -372,10 +367,6 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(esr_nominal),
 	POWER_SUPPLY_ATTR(soh),
 	POWER_SUPPLY_ATTR(qc_opti_disable),
-	POWER_SUPPLY_ATTR(fcc_stepper_enable),
-	POWER_SUPPLY_ATTR(cc_soc),
-	POWER_SUPPLY_ATTR(qg_vbms_mode),
-	POWER_SUPPLY_ATTR(real_capacity),
 	/* Local extensions of type int64_t */
 	POWER_SUPPLY_ATTR(charge_counter_ext),
 	/* Properties of type `const char *' */

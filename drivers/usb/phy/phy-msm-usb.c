@@ -1638,14 +1638,12 @@ phcd_retry:
 
 	atomic_set(&motg->in_lpm, 1);
 
-	if (host_bus_suspend || device_bus_suspend) {
-		/* Enable ASYNC IRQ during LPM */
-		enable_irq(motg->async_irq);
-		enable_irq(motg->irq);
-	}
+	/* Enable ASYNC IRQ during LPM */
+	enable_irq(motg->async_irq);
 	if (motg->phy_irq)
 		enable_irq(motg->phy_irq);
 
+	enable_irq(motg->irq);
 	pm_relax(&motg->pdev->dev);
 
 	dev_dbg(phy->dev, "LPM caps = %lu flags = %lu\n",
@@ -1690,12 +1688,10 @@ static int msm_otg_resume(struct msm_otg *motg)
 		return 0;
 	}
 
-	pm_stay_awake(&motg->pdev->dev);
+	disable_irq(motg->irq);
 	if (motg->phy_irq)
 		disable_irq(motg->phy_irq);
-
-	if (motg->host_bus_suspend || motg->device_bus_suspend)
-		disable_irq(motg->irq);
+	pm_stay_awake(&motg->pdev->dev);
 
 	/*
 	 * If we are resuming from the device bus suspend, restore
@@ -1818,8 +1814,7 @@ skip_phy_resume:
 	enable_irq(motg->irq);
 
 	/* Enable ASYNC_IRQ only during LPM */
-	if (motg->host_bus_suspend || motg->device_bus_suspend)
-		disable_irq(motg->async_irq);
+	disable_irq(motg->async_irq);
 
 	if (motg->phy_irq_pending) {
 		motg->phy_irq_pending = false;
@@ -3681,11 +3676,6 @@ static int msm_otg_extcon_register(struct msm_otg *motg)
 	struct extcon_dev *edev;
 	int ret = 0;
 
-	if (motg->extcon_registered) {
-		dev_info(&motg->pdev->dev, "extcon_nb already registered\n");
-		return 0;
-	}
-
 	if (!of_property_read_bool(node, "extcon"))
 		return 0;
 
@@ -3722,7 +3712,6 @@ static int msm_otg_extcon_register(struct msm_otg *motg)
 			goto err;
 		}
 	}
-	motg->extcon_registered = true;
 
 	return 0;
 err:
@@ -4323,7 +4312,7 @@ static int msm_otg_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&motg->sdp_check, check_for_sdp_connection);
 	INIT_WORK(&motg->notify_charger_work, msm_otg_notify_charger_work);
 	INIT_WORK(&motg->extcon_register_work, msm_otg_extcon_register_work);
-	motg->otg_wq = alloc_ordered_workqueue("k_otg", WQ_FREEZABLE);
+	motg->otg_wq = alloc_ordered_workqueue("k_otg", 0);
 	if (!motg->otg_wq) {
 		pr_err("%s: Unable to create workqueue otg_wq\n",
 			__func__);

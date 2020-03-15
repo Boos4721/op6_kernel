@@ -27,6 +27,4 @@
 	warm-bat-decidegc = <480>;
 };
 
-&pmi8998_charger {
-	ibatmax-little-cool-low_ma = <480>;
-};
+

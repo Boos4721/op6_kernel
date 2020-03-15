@@ -120,10 +120,6 @@ static const char * const mem_cgroup_lru_names[] = {
 	"active_anon",
 	"inactive_file",
 	"active_file",
-#ifdef CONFIG_MEMPLUS
-	"inactive_anon_swpcache",
-	"active_anon_swpcache",
-#endif
 	"unevictable",
 };
 
@@ -745,7 +741,7 @@ static struct mem_cgroup *get_mem_cgroup_from_mm(struct mm_struct *mm)
 			if (unlikely(!memcg))
 				memcg = root_mem_cgroup;
 		}
-	} while (!css_tryget(&memcg->css));
+	} while (!css_tryget_online(&memcg->css));
 	rcu_read_unlock();
 	return memcg;
 }
@@ -2348,16 +2344,6 @@ int memcg_kmem_charge_memcg(struct page *page, gfp_t gfp, int order,
 
 	if (!cgroup_subsys_on_dfl(memory_cgrp_subsys) &&
 	    !page_counter_try_charge(&memcg->kmem, nr_pages, &counter)) {
-
-		/*
-		 * Enforce __GFP_NOFAIL allocation because callers are not
-		 * prepared to see failures and likely do not have any failure
-		 * handling code.
-		 */
-		if (gfp & __GFP_NOFAIL) {
-			page_counter_charge(&memcg->kmem, nr_pages);
-			return 0;
-		}
 		cancel_charge(memcg, nr_pages);
 		return -ENOMEM;
 	}

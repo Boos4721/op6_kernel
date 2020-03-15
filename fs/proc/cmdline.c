@@ -8,8 +8,7 @@ static char new_command_line[COMMAND_LINE_SIZE];
 
 static int cmdline_proc_show(struct seq_file *m, void *v)
 {
-	seq_puts(m, new_command_line);
-	seq_putc(m, '\n');
+	seq_printf(m, "%s\n", new_command_line);
 	return 0;
 }
 
@@ -35,14 +34,12 @@ static void remove_flag(char *cmd, const char *flag)
 		if (end_addr)
 			memmove(start_addr, end_addr + 1, strlen(end_addr));
 		else
-			*(start_addr - 1) = '\0';
+			*(max(cmd, start_addr - 1)) = '\0';
 	}
 }
 
 static void remove_safetynet_flags(char *cmd)
 {
-	remove_flag(cmd, "androidboot.enable_dm_verity=");
-	remove_flag(cmd, "androidboot.secboot=");
 	remove_flag(cmd, "androidboot.verifiedbootstate=");
 	remove_flag(cmd, "androidboot.veritymode=");
 }

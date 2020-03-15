@@ -3830,8 +3830,8 @@ retry:
 	if (wbc->sync_mode == WB_SYNC_ALL)
 		tag_pages_for_writeback(mapping, index, end);
 	while (!done && !nr_to_write_done && (index <= end) &&
-	       (nr_pages = pagevec_lookup_range_tag(&pvec, mapping, &index, end,
-			tag))) {
+	       (nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
+			min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1))) {
 		unsigned i;
 
 		scanned = 1;
@@ -3840,6 +3840,11 @@ retry:
 
 			if (!PagePrivate(page))
 				continue;
+
+			if (!wbc->range_cyclic && page->index > end) {
+				done = 1;
+				break;
+			}
 
 			spin_lock(&mapping->private_lock);
 			if (!PagePrivate(page)) {
@@ -3973,8 +3978,8 @@ retry:
 		tag_pages_for_writeback(mapping, index, end);
 	done_index = index;
 	while (!done && !nr_to_write_done && (index <= end) &&
-			(nr_pages = pagevec_lookup_range_tag(&pvec, mapping,
-						&index, end, tag))) {
+	       (nr_pages = pagevec_lookup_tag(&pvec, mapping, &index, tag,
+			min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1))) {
 		unsigned i;
 
 		scanned = 1;
@@ -3995,6 +4000,12 @@ retry:
 			}
 
 			if (unlikely(page->mapping != mapping)) {
+				unlock_page(page);
+				continue;
+			}
+
+			if (!wbc->range_cyclic && page->index > end) {
+				done = 1;
 				unlock_page(page);
 				continue;
 			}
@@ -4049,14 +4060,6 @@ retry:
 		 */
 		scanned = 1;
 		index = 0;
-
-		/*
-		 * If we're looping we could run into a page that is locked by a
-		 * writer and that writer could be waiting on writeback for a
-		 * page in our current bio, and thus deadlock, so flush the
-		 * write bio here.
-		 */
-		flush_write_bio(data);
 		goto retry;
 	}
 
@@ -4991,14 +4994,12 @@ struct extent_buffer *alloc_test_extent_buffer(struct btrfs_fs_info *fs_info,
 		return eb;
 	eb = alloc_dummy_extent_buffer(fs_info, start, nodesize);
 	if (!eb)
-		return ERR_PTR(-ENOMEM);
+		return NULL;
 	eb->fs_info = fs_info;
 again:
 	ret = radix_tree_preload(GFP_NOFS);
-	if (ret) {
-		exists = ERR_PTR(ret);
+	if (ret)
 		goto free_eb;
-	}
 	spin_lock(&fs_info->buffer_lock);
 	ret = radix_tree_insert(&fs_info->buffer_radix,
 				start >> PAGE_SHIFT, eb);

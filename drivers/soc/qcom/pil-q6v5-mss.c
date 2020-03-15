@@ -31,7 +31,6 @@
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/ramdump.h>
 #include <soc/qcom/smem.h>
-#include <linux/pstore.h>
 
 #include "peripheral-loader.h"
 #include "pil-q6v5.h"
@@ -43,7 +42,7 @@
 
 #define subsys_to_drv(d) container_of(d, struct modem_data, subsys_desc)
 
-static void log_modem_sfr(struct modem_data *drv)
+static void log_modem_sfr(void)
 {
 	u32 size;
 	char *smem_reason, reason[MAX_SSR_REASON_LEN], *function_name;
@@ -61,15 +60,13 @@ static void log_modem_sfr(struct modem_data *drv)
 
 	strlcpy(reason, smem_reason, min(size, MAX_SSR_REASON_LEN));
 	function_name = parse_function_builtin_return_address((unsigned long)__builtin_return_address(0));
-	save_modem_dump_reason_to_device_info(reason);
 	save_dump_reason_to_smem(reason, function_name);
 	pr_err("modem subsystem failure reason: %s.\n", reason);
-	subsys_store_crash_reason(drv->subsys, reason);
 }
 
 static void restart_modem(struct modem_data *drv)
 {
-	log_modem_sfr(drv);
+	log_modem_sfr();
 	drv->ignore_errors = true;
 	subsystem_restart_dev(drv->subsys);
 }

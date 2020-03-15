@@ -84,11 +84,6 @@
 /* PERIPH_SS_PHY_REFGEN_NORTH_BG_CTRL register bits */
 #define BANDGAP_BYPASS			BIT(0)
 
-/* DEBUG_CTRL2 register value to program VSTATUS MUX for PHY status */
-#define DEBUG_CTRL2_MUX_PLL_LOCK_STATUS	0x4
-
-/* STAT5 register bits */
-#define VSTATUS_PLL_LOCK_STATUS_MASK	BIT(0)
 unsigned int phy_tune1;
 module_param(phy_tune1, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(phy_tune1, "QUSB PHY v2 TUNE1");
@@ -122,8 +117,6 @@ enum qusb_phy_reg {
 	SQ_CTRL1,
 	SQ_CTRL2,
 	DEBUG_CTRL1,
-	DEBUG_CTRL2,
-	STAT5,
 	USB2_PHY_REG_MAX,
 };
 
@@ -145,7 +138,6 @@ struct qusb_phy {
 	int			vdd_levels[3]; /* none, low, high */
 	int			init_seq_len;
 	int			*qusb_phy_init_seq;
-/*2018/03/31 @BSP add host mode phy init parameters*/
 	int			ophost_init_seq_len;
 	int			*qusb_phy_ophost_init_seq;
 	int			host_init_seq_len;
@@ -155,7 +147,6 @@ struct qusb_phy {
 	int			qusb_phy_reg_offset_cnt;
 
 	u32			tune_val;
-/*2018/02/21 BSP@Infi do not need override the bias2 value*/
 	bool		overwrite_bias2_disable;
 	int			efuse_bit_pos;
 	int			efuse_num_of_bits;
@@ -174,10 +165,8 @@ struct qusb_phy {
 	bool			chirp_disable;
 
 	struct pinctrl		*pinctrl;
-	struct pinctrl_state	*atest_usb_suspend;
-	struct pinctrl_state	*atest_usb_active;
-
-/*2018/06/28 @BSP Add HW-SW WR to optimize the usb diagram*/
+	struct pinctrl_state	*atest_usb13_suspend;
+	struct pinctrl_state	*atest_usb13_active;
 	struct pinctrl_state	*usb_oe_active;
 	struct pinctrl_state	*usb_oe_suspend;
 	bool			usb_oe_exist;
@@ -517,18 +506,6 @@ static void qusb_phy_reset(struct qusb_phy *qphy)
 							__func__);
 }
 
-static bool qusb_phy_pll_locked(struct qusb_phy *qphy)
-{
-	u32 val;
-
-	writel_relaxed(DEBUG_CTRL2_MUX_PLL_LOCK_STATUS,
-		       qphy->base + qphy->phy_reg[DEBUG_CTRL2]);
-
-	val = readl_relaxed(qphy->base + qphy->phy_reg[STAT5]);
-
-	return (val & VSTATUS_PLL_LOCK_STATUS_MASK);
-}
-
 static void qusb_phy_host_init(struct usb_phy *phy)
 {
 	u8 reg;
@@ -650,7 +627,6 @@ static int qusb_phy_init(struct usb_phy *phy)
 			PWR_CTRL1_POWR_DOWN,
 			qphy->base + qphy->phy_reg[PWR_CTRL1]);
 
-/*2018/03/31 @BSP add host mode phy init parameters*/
 	if (qphy->qusb_phy_init_seq || qphy->qusb_phy_ophost_init_seq){
 		if ((qphy->phy.flags & PHY_HOST_MODE) && qphy->qusb_phy_ophost_init_seq){
 			dev_info(phy->dev, "%s PHY_HOST_MODE!\n", __func__);
@@ -682,11 +658,6 @@ static int qusb_phy_init(struct usb_phy *phy)
 							(4 * p_index));
 		}
 	}
-
-	if (qphy->bias_ctrl2)
-		writel_relaxed(qphy->bias_ctrl2,
-				qphy->base + qphy->phy_reg[BIAS_CTRL_2]);
-/*2018/02/21 BSP@Infi do not need override the bias2 value*/
 	if (qphy->refgen_north_bg_reg && !qphy->overwrite_bias2_disable)
 		if (readl_relaxed(qphy->refgen_north_bg_reg) & BANDGAP_BYPASS){
 			pr_debug("%s(): overwrite bias2\n", __func__);
@@ -747,6 +718,10 @@ static int qusb_phy_init(struct usb_phy *phy)
 				qphy->base + qphy->phy_reg[BIAS_CTRL_2]);
 	}
 
+	if (qphy->bias_ctrl2)
+		writel_relaxed(qphy->bias_ctrl2,
+				qphy->base + qphy->phy_reg[BIAS_CTRL_2]);
+
 	/* ensure above writes are completed before re-enabling PHY */
 	wmb();
 
@@ -775,13 +750,12 @@ static enum hrtimer_restart qusb_dis_ext_pulldown_timer(struct hrtimer *timer)
 	struct qusb_phy *qphy = container_of(timer, struct qusb_phy, timer);
 	int ret = 0;
 
-	if (qphy->pinctrl && qphy->atest_usb_suspend) {
+	if (qphy->pinctrl && qphy->atest_usb13_suspend) {
 		ret = pinctrl_select_state(qphy->pinctrl,
-				qphy->atest_usb_suspend);
+				qphy->atest_usb13_suspend);
 		if (ret < 0)
 			dev_err(qphy->phy.dev,
 				"pinctrl state suspend select failed\n");
-/*2018/06/28 @BSP Add HW-SW WR to optimize the usb diagram*/
 		if (qphy->usb_oe_exist && qphy->usb_oe_active) {
 			ret = pinctrl_select_state(qphy->pinctrl,
 					qphy->usb_oe_active);
@@ -801,15 +775,14 @@ static void qusb_phy_enable_ext_pulldown(struct usb_phy *phy)
 
 	dev_dbg(phy->dev, "%s\n", __func__);
 
-	if (qphy->pinctrl && qphy->atest_usb_active) {
+	if (qphy->pinctrl && qphy->atest_usb13_active) {
 		ret = pinctrl_select_state(qphy->pinctrl,
-				qphy->atest_usb_active);
+				qphy->atest_usb13_active);
 		if (ret < 0) {
 			dev_err(phy->dev,
 					"pinctrl state active select failed\n");
 			return;
 		}
-/*2018/06/28 @BSP Add HW-SW WR to optimize the usb diagram*/
 		if (qphy->usb_oe_exist && qphy->usb_oe_suspend) {
 			ret = pinctrl_select_state(qphy->pinctrl,
 					qphy->usb_oe_suspend);
@@ -821,7 +794,6 @@ static void qusb_phy_enable_ext_pulldown(struct usb_phy *phy)
 	}
 }
 
-/*2018/06/28 @BSP Add HW-SW WR to optimize the usb diagram*/
 static void qusb_phy_enable_usb_oe(struct usb_phy *phy)
 {
 	struct qusb_phy *qphy = container_of(phy, struct qusb_phy, phy);
@@ -907,12 +879,18 @@ static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)
 			writel_relaxed(intr_mask,
 				qphy->base + qphy->phy_reg[INTR_CTRL]);
 
+			/* hold core PLL into reset */
+			writel_relaxed(CORE_PLL_EN_FROM_RESET |
+				CORE_RESET | CORE_RESET_MUX,
+				qphy->base +
+				qphy->phy_reg[PLL_CORE_INPUT_OVERRIDE]);
+
 			if (linestate & (LINESTATE_DP | LINESTATE_DM)) {
 				/* enable phy auto-resume */
 				writel_relaxed(0x91,
 					qphy->base + qphy->phy_reg[TEST1]);
-				/* Delay recommended between TEST1 writes */
-				usleep_range(10, 20);
+				/* flush the previous write before next write */
+				wmb();
 				writel_relaxed(0x90,
 					qphy->base + qphy->phy_reg[TEST1]);
 			}
@@ -941,26 +919,12 @@ static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)
 			writel_relaxed(0x00,
 				qphy->base + qphy->phy_reg[INTR_CTRL]);
 
-			/* Reset PLL if needed */
-			if (!qusb_phy_pll_locked(qphy)) {
-				dev_dbg(phy->dev, "%s: reset PLL\n", __func__);
-				/* hold core PLL into reset */
-				writel_relaxed(CORE_PLL_EN_FROM_RESET |
-					CORE_RESET | CORE_RESET_MUX,
-					qphy->base +
-					qphy->phy_reg[PLL_CORE_INPUT_OVERRIDE]);
+			/* bring core PLL out of reset */
+			writel_relaxed(CORE_PLL_EN_FROM_RESET, qphy->base +
+				qphy->phy_reg[PLL_CORE_INPUT_OVERRIDE]);
 
-				/* Wait for PLL to get reset */
-				usleep_range(10, 20);
-
-				/* bring core PLL out of reset */
-				writel_relaxed(CORE_PLL_EN_FROM_RESET,
-					qphy->base +
-					qphy->phy_reg[PLL_CORE_INPUT_OVERRIDE]);
-
-				/* Makes sure that above write goes through */
-				wmb();
-			}
+			/* Makes sure that above write goes through */
+			wmb();
 		} else { /* Cable connect case */
 			qusb_phy_enable_clocks(qphy, true);
 		}
@@ -1202,7 +1166,6 @@ static int qusb_phy_probe(struct platform_device *pdev)
 		qphy->efuse_reg = devm_ioremap_nocache(dev, res->start,
 							resource_size(res));
 		if (!IS_ERR_OR_NULL(qphy->efuse_reg)) {
-/*2018/02/21 BSP@Infi do not need override the bias2 value*/
 			qphy->overwrite_bias2_disable = of_property_read_bool(dev->of_node,
 					"qcom,overwrite-bias2-disable");
 			ret = of_property_read_u32(dev->of_node,
@@ -1386,7 +1349,6 @@ static int qusb_phy_probe(struct platform_device *pdev)
 		}
 	}
 
-/*2018/03/31 @BSP add host mode phy init parameters*/
 	size = 0;
 	of_get_property(dev->of_node, "qcom,qusb-phy-ophost-init-seq", &size);
 	if (size) {
@@ -1473,30 +1435,18 @@ static int qusb_phy_probe(struct platform_device *pdev)
 		dev_err(dev, "pinctrl not available\n");
 		goto skip_pinctrl_config;
 	}
-	qphy->atest_usb_suspend = pinctrl_lookup_state(qphy->pinctrl,
+	qphy->atest_usb13_suspend = pinctrl_lookup_state(qphy->pinctrl,
 							"atest_usb13_suspend");
-
-	if (IS_ERR(qphy->atest_usb_suspend) &&
-			PTR_ERR(qphy->atest_usb_suspend) == -ENODEV) {
-		qphy->atest_usb_suspend = pinctrl_lookup_state(qphy->pinctrl,
-								"suspend");
-		if (IS_ERR(qphy->atest_usb_suspend)) {
-			dev_err(dev, "pinctrl lookup suspend failed\n");
-			goto skip_pinctrl_config;
-		}
+	if (IS_ERR(qphy->atest_usb13_suspend)) {
+		dev_err(dev, "pinctrl lookup atest_usb13_suspend failed\n");
+		goto skip_pinctrl_config;
 	}
 
-	qphy->atest_usb_active = pinctrl_lookup_state(qphy->pinctrl,
+	qphy->atest_usb13_active = pinctrl_lookup_state(qphy->pinctrl,
 							"atest_usb13_active");
-	if (IS_ERR(qphy->atest_usb_active) &&
-			PTR_ERR(qphy->atest_usb_active) == -ENODEV) {
-		qphy->atest_usb_active = pinctrl_lookup_state(qphy->pinctrl,
-							"active");
-		if (IS_ERR(qphy->atest_usb_active))
-			dev_err(dev, "pinctrl lookup active failed\n");
-	}
+	if (IS_ERR(qphy->atest_usb13_active))
+		dev_err(dev, "pinctrl lookup atest_usb13_active failed\n");
 
-/*2018/06/28 @BSP Add HW-SW WR to optimize the usb diagram*/
 	qphy->usb_oe_exist = of_property_read_bool(dev->of_node,
 							"qcom,usb-oe-exist");
 	dev_info(dev, "usb_oe_exist=%d\n", qphy->usb_oe_exist);
@@ -1543,7 +1493,6 @@ skip_pinctrl_config:
 	ret = qusb_phy_regulator_init(qphy);
 	if (ret)
 		usb_remove_phy(&qphy->phy);
-/*2018/06/28 @BSP Add HW-SW WR to optimize the usb diagram*/
 	if (qphy->usb_oe_exist)
 		qusb_phy_enable_usb_oe(&qphy->phy);
 	qusb_phy_create_debugfs(qphy);

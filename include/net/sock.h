@@ -183,7 +183,6 @@ struct sock_common {
 	struct proto		*skc_prot;
 	possible_net_t		skc_net;
 
-
 #if IS_ENABLED(CONFIG_IPV6)
 	struct in6_addr		skc_v6_daddr;
 	struct in6_addr		skc_v6_rcv_saddr;
@@ -343,7 +342,6 @@ struct sock {
 #define sk_incoming_cpu		__sk_common.skc_incoming_cpu
 #define sk_flags		__sk_common.skc_flags
 #define sk_rxhash		__sk_common.skc_rxhash
-
 
 	socket_lock_t		sk_lock;
 	struct sk_buff_head	sk_receive_queue;
@@ -662,11 +660,6 @@ static inline void sk_add_node_tail_rcu(struct sock *sk, struct hlist_head *list
 static inline void __sk_nulls_add_node_rcu(struct sock *sk, struct hlist_nulls_head *list)
 {
 	hlist_nulls_add_head_rcu(&sk->sk_nulls_node, list);
-}
-
-static inline void __sk_nulls_add_node_tail_rcu(struct sock *sk, struct hlist_nulls_head *list)
-{
-	hlist_nulls_add_tail_rcu(&sk->sk_nulls_node, list);
 }
 
 static inline void sk_nulls_add_node_rcu(struct sock *sk, struct hlist_nulls_head *list)
@@ -1209,7 +1202,7 @@ static inline void sk_sockets_allocated_inc(struct sock *sk)
 	percpu_counter_inc(sk->sk_prot->sockets_allocated);
 }
 
-static inline u64
+static inline int
 sk_sockets_allocated_read_positive(struct sock *sk)
 {
 	return percpu_counter_read_positive(sk->sk_prot->sockets_allocated);
@@ -2059,17 +2052,12 @@ struct sk_buff *sk_stream_alloc_skb(struct sock *sk, int size, gfp_t gfp,
  * sk_page_frag - return an appropriate page_frag
  * @sk: socket
  *
- * Use the per task page_frag instead of the per socket one for
- * optimization when we know that we're in the normal context and owns
- * everything that's associated with %current.
- *
- * gfpflags_allow_blocking() isn't enough here as direct reclaim may nest
- * inside other socket operations and end up recursing into sk_page_frag()
- * while it's already in use.
+ * If socket allocation mode allows current thread to sleep, it means its
+ * safe to use the per task page_frag instead of the per socket one.
  */
 static inline struct page_frag *sk_page_frag(struct sock *sk)
 {
-	if (gfpflags_normal_context(sk->sk_allocation))
+	if (gfpflags_allow_blocking(sk->sk_allocation))
 		return &current->task_frag;
 
 	return &sk->sk_frag;
@@ -2156,7 +2144,7 @@ static inline ktime_t sock_read_timestamp(struct sock *sk)
 
 	return kt;
 #else
-	return READ_ONCE(sk->sk_stamp);
+	return sk->sk_stamp;
 #endif
 }
 
@@ -2167,7 +2155,7 @@ static inline void sock_write_timestamp(struct sock *sk, ktime_t kt)
 	sk->sk_stamp = kt;
 	write_sequnlock(&sk->sk_stamp_seq);
 #else
-	WRITE_ONCE(sk->sk_stamp, kt);
+	sk->sk_stamp = kt;
 #endif
 }
 

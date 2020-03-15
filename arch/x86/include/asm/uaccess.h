@@ -8,7 +8,6 @@
 #include <linux/kasan-checks.h>
 #include <linux/thread_info.h>
 #include <linux/string.h>
-#include <linux/sched.h>
 #include <asm/asm.h>
 #include <asm/page.h>
 #include <asm/smap.h>
@@ -32,12 +31,7 @@
 
 #define get_ds()	(KERNEL_DS)
 #define get_fs()	(current->thread.addr_limit)
-static inline void set_fs(mm_segment_t fs)
-{
-	current->thread.addr_limit = fs;
-	/* On user-mode return, check fs is correct */
-	set_thread_flag(TIF_FSCHECK);
-}
+#define set_fs(x)	(current->thread.addr_limit = (x))
 
 #define segment_eq(a, b)	((a).seg == (b).seg)
 
@@ -444,10 +438,8 @@ do {									\
 ({									\
 	int __gu_err;							\
 	__inttype(*(ptr)) __gu_val;					\
-	__typeof__(ptr) __gu_ptr = (ptr);				\
-	__typeof__(size) __gu_size = (size);				\
 	__uaccess_begin_nospec();					\
-	__get_user_size(__gu_val, __gu_ptr, __gu_size, __gu_err, -EFAULT);	\
+	__get_user_size(__gu_val, (ptr), (size), __gu_err, -EFAULT);	\
 	__uaccess_end();						\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;			\
 	__builtin_expect(__gu_err, 0);					\

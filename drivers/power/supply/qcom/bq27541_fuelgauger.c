@@ -32,7 +32,6 @@
 #include <linux/regulator/machine.h>
 #include <linux/err.h>
 #include <linux/rtc.h>
-#include <linux/oneplus/boot_mode.h>
 
 #ifdef CONFIG_OF
 #include <linux/gpio.h>
@@ -42,7 +41,6 @@
 
 #include <linux/power/oem_external_fg.h>
 
-/* david.liu@bsp, 20161004 Add BQ27411 support */
 #define CONFIG_GAUGE_BQ27411		1
 #define DEVICE_TYPE_BQ27541		0x0541
 #define DEVICE_TYPE_BQ27411		0x0421
@@ -85,7 +83,6 @@
 #define BQ27541_CS_SS		    BIT(13)
 
 #ifdef CONFIG_GAUGE_BQ27411
-/* david.liu@bsp, 20161004 Add BQ27411 support */
 /* Bq27411 standard data commands */
 #define BQ27411_REG_TEMP                0x02
 #define BQ27411_REG_VOLT                0x04
@@ -98,7 +95,7 @@
 
 #define CONTROL_CMD                 0x00
 #define CONTROL_STATUS              0x00
-#define SEAL_POLLING_RETRY_LIMIT    SEAL_POLLING_RETRY_LIMIT_2
+#define SEAL_POLLING_RETRY_LIMIT    100
 #define BQ27541_UNSEAL_KEY          0x11151986
 #define BQ27411_UNSEAL_KEY          0x80008000
 
@@ -155,7 +152,7 @@
 #define BQ27541_SUBCMD_CAL_MODE  0x0040
 #define BQ27541_SUBCMD_RESET     0x0041
 #define ZERO_DEGREE_CELSIUS_IN_TENTH_KELVIN   (-2731)
-#define BQ27541_INIT_DELAY   ((HZ)*1)
+#define BQ27541_INIT_DELAY_MS 1000
 #define SET_BQ_PARAM_DELAY_MS 600
 
 
@@ -200,7 +197,6 @@ struct bq27541_access_methods {
 };
 
 #ifdef CONFIG_GAUGE_BQ27411
-/* david.liu@bsp, 20161004 Add BQ27411 support */
 struct cmd_address {
 	u8	reg_temp;
 	u8	reg_volt;
@@ -251,7 +247,6 @@ struct bq27541_device_info {
 	unsigned long	soc_pre_time;
 	unsigned long	soc_store_time;
 #ifdef CONFIG_GAUGE_BQ27411
-	/* david.liu@bsp, 20161004 Add BQ27411 support */
 	int device_type;
 	struct cmd_address cmd_addr;
 	bool modify_soc_smooth;
@@ -261,7 +256,6 @@ struct bq27541_device_info {
 #endif
 };
 
-/*add by yangrujin@bsp 2016/3/16, reduce bq resume time*/
 
 #include <linux/workqueue.h>
 
@@ -276,8 +270,6 @@ static int __debug_temp_mask;
 module_param_named(
 	debug_temp_mask, __debug_temp_mask, int, 0600
 );
-
-int SEAL_POLLING_RETRY_LIMIT_2;
 
 static void bq27411_modify_soc_smooth_parameter(
 	struct bq27541_device_info *di, bool is_powerup);
@@ -311,7 +303,6 @@ static int bq27541_battery_temperature(struct bq27541_device_info *di)
 	if (di->allow_reading) {
 
 #ifdef CONFIG_GAUGE_BQ27411
-		/* david.liu@bsp, 20161004 Add BQ27411 support */
 		ret = bq27541_read(di->cmd_addr.reg_temp,
 				&temp, 0, di);
 #else
@@ -358,7 +349,6 @@ static int bq27541_battery_voltage(struct bq27541_device_info *di)
 
 	if (di->allow_reading) {
 #ifdef CONFIG_GAUGE_BQ27411
-		/* david.liu@bsp, 20161004 Add BQ27411 support */
 		ret = bq27541_read(di->cmd_addr.reg_volt,
 				&volt, 0, di);
 #else
@@ -797,7 +787,6 @@ struct bq27541_device_info *di, int suspend_time_ms)
 
 	if (di->allow_reading) {
 #ifdef CONFIG_GAUGE_BQ27411
-		/* david.liu@bsp, 20161004 Add BQ27411 support */
 		ret = bq27541_read(di->cmd_addr.reg_soc,
 				&soc, 0, di);
 #else
@@ -870,7 +859,6 @@ static int bq27541_average_current(struct bq27541_device_info *di)
 
 	if (di->allow_reading) {
 #ifdef CONFIG_GAUGE_BQ27411
-		/* david.liu@bsp, 20161004 Add BQ27411 support */
 		ret = bq27541_read(di->cmd_addr.reg_ai,
 				&curr, 0, di);
 #else
@@ -897,7 +885,6 @@ static int bq27541_remaining_capacity(struct bq27541_device_info *di)
 
 	if (di->allow_reading) {
 #ifdef CONFIG_GAUGE_BQ27411
-		/* david.liu@bsp, 20161004 Add BQ27411 support */
 		ret = bq27541_read(di->cmd_addr.reg_rm,
 				&cap, 0, di);
 #else
@@ -1040,7 +1027,6 @@ static bool bq27541_is_battery_id_valid(void)
 }
 
 #ifdef CONFIG_GAUGE_BQ27411
-/* david.liu@bsp, 20161025 Add BQ27411 dash charging */
 static int bq27541_get_device_type(void)
 {
 	if (bq27541_di)
@@ -1110,7 +1096,6 @@ static struct external_battery_gauge bq27541_batt_gauge = {
 	.get_batt_health        = bq27541_get_batt_health,
 	.get_batt_bq_soc		= bq27541_get_batt_bq_soc,
 #ifdef CONFIG_GAUGE_BQ27411
-	/* david.liu@bsp, 20161025 Add BQ27411 dash charging */
 	.get_device_type            = bq27541_get_device_type,
 #endif
 	.get_battery_soc            = bq27541_get_battery_soc,
@@ -1128,7 +1113,7 @@ static int is_usb_pluged(void)
 {
 	static struct power_supply *psy;
 	union power_supply_propval ret = {0,};
-	int usb_present, rc; /* david@bsp modified */
+	int usb_present, rc;
 
 	if (!psy) {
 		psy = power_supply_get_by_name("usb");
@@ -1138,7 +1123,6 @@ static int is_usb_pluged(void)
 		}
 	}
 
-	/* david@bsp modified */
 	rc = power_supply_get_property(psy, POWER_SUPPLY_PROP_PRESENT, &ret);
 	if (rc)
 		return -EINVAL;
@@ -1181,7 +1165,7 @@ static int bq27541_temperature_thrshold_update(int temp)
 }
 static void update_battery_soc_work(struct work_struct *work)
 {
-	int schedule_time, vbat, temp;
+	int vbat, temp;
 
 	if (is_usb_pluged() || get_dash_started()) {
 		schedule_delayed_work(
@@ -1206,12 +1190,12 @@ static void update_battery_soc_work(struct work_struct *work)
 	bq27541_set_allow_reading(false);
 	bq27541_temperature_thrshold_update(temp);
 	if (!bq27541_di->already_modify_smooth)
-		schedule_delayed_work(
-		&bq27541_di->modify_soc_smooth_parameter, 1000);
-	schedule_time =
-		vbat < 3600 ? LOW_BAT_SOC_UPDATE_MS : BATTERY_SOC_UPDATE_MS;
+		schedule_delayed_work(&bq27541_di->modify_soc_smooth_parameter,
+				msecs_to_jiffies(10000));
+
 	schedule_delayed_work(&bq27541_di->battery_soc_work,
-			msecs_to_jiffies(schedule_time));
+			msecs_to_jiffies(vbat < 3600 ?
+				LOW_BAT_SOC_UPDATE_MS : BATTERY_SOC_UPDATE_MS));
 }
 
 static bool bq27541_registered;
@@ -1227,7 +1211,6 @@ bool get_extern_bq_present(void)
 }
 
 #ifdef CONFIG_GAUGE_BQ27411
-/* david.liu@bsp, 20161004 Add BQ27411 support */
 static void gauge_set_cmd_addr(int device_type)
 {
 	if (device_type == DEVICE_BQ27541) {
@@ -1337,7 +1320,6 @@ static void bq27541_hw_config(struct work_struct *work)
 	bq27541_read(BQ27541_REG_CNTL, &fw_ver, 0, di);
 
 #ifdef CONFIG_GAUGE_BQ27411
-	/* david.liu@bsp, 20161004 Add BQ27411 support */
 	if (type == DEVICE_TYPE_BQ27411) {
 		di->device_type = DEVICE_BQ27411;
 		pr_info("DEVICE_BQ27411\n");
@@ -1356,7 +1338,7 @@ static void bq27541_hw_config(struct work_struct *work)
 	pr_info("Complete bq27541 configuration 0x%02X\n", flags);
 	schedule_delayed_work(
 		&di->modify_soc_smooth_parameter,
-		SET_BQ_PARAM_DELAY_MS);
+		msecs_to_jiffies(SET_BQ_PARAM_DELAY_MS * 10));
 }
 
 static int bq27541_read_i2c(u8 reg, int *rt_value, int b_single,
@@ -1584,11 +1566,6 @@ re_unseal:
 	usleep_range(10000, 10001);
 	bq27541_cntl_cmd(bq27541_di, 0xffff);
 	usleep_range(10000, 10001);
-
-	if (get_boot_mode() == MSM_BOOT_MODE__RECOVERY || get_boot_mode() == MSM_BOOT_MODE__CHARGE)
-		SEAL_POLLING_RETRY_LIMIT_2 = 10;
-	else
-		SEAL_POLLING_RETRY_LIMIT_2 = 100;
 
 	while (i < SEAL_POLLING_RETRY_LIMIT) {
 		i++;
@@ -1965,7 +1942,6 @@ static int bq27541_battery_probe(struct i2c_client *client,
 	di->soc_pre = DEFAULT_INVALID_SOC_PRE;
 	di->temp_pre = 0;
 #ifndef CONFIG_GAUGE_BQ27411
-	/* david.liu@bsp, 20161004 Add BQ27411 support */
 	di->allow_reading = true;
 #endif
 	/* Add for retry when config fail */
@@ -2001,8 +1977,8 @@ static int bq27541_battery_probe(struct i2c_client *client,
 	INIT_DELAYED_WORK(&di->modify_soc_smooth_parameter,
 		bq_modify_soc_smooth_parameter);
 	INIT_DELAYED_WORK(&di->battery_soc_work, update_battery_soc_work);
-	schedule_delayed_work(&di->hw_config, BQ27541_INIT_DELAY);
-	schedule_delayed_work(&di->battery_soc_work, BATTERY_SOC_UPDATE_MS);
+	schedule_delayed_work(&di->hw_config, msecs_to_jiffies(BQ27541_INIT_DELAY_MS));
+	schedule_delayed_work(&di->battery_soc_work, msecs_to_jiffies(BATTERY_SOC_UPDATE_MS * 100));
 	retval = check_bat_present(di);
 	if( retval ) {
 		init_battery_exist_node();

@@ -73,14 +73,12 @@
  */
 enum pageflags {
 	PG_locked,		/* Page is locked. Don't touch. */
-	PG_waiters,		/* Page has waiters, check its waitqueue */
+	PG_error,
 	PG_referenced,
 	PG_uptodate,
 	PG_dirty,
 	PG_lru,
 	PG_active,
-	PG_workingset,
-	PG_error,
 	PG_slab,
 	PG_owner_priv_1,	/* Owner use. If pagecache, fs may use*/
 	PG_arch_1,
@@ -107,12 +105,7 @@ enum pageflags {
 	PG_young,
 	PG_idle,
 #endif
-#ifdef CONFIG_MEMPLUS
-	PG_willneed,
-#endif
-#ifdef CONFIG_SMART_BOOST
 	PG_uidlru,
-#endif
 	__NR_PAGEFLAGS,
 
 	/* Filesystems */
@@ -175,9 +168,6 @@ static __always_inline int PageCompound(struct page *page)
  *     for compound page all operations related to the page flag applied to
  *     head page.
  *
- * PF_ONLY_HEAD:
- *     for compound page, callers only ever operate on the head page.
- *
  * PF_NO_TAIL:
  *     modifications of the page flag must be done on small or head pages,
  *     checks can be done on tail pages too.
@@ -187,9 +177,6 @@ static __always_inline int PageCompound(struct page *page)
  */
 #define PF_ANY(page, enforce)	page
 #define PF_HEAD(page, enforce)	compound_head(page)
-#define PF_ONLY_HEAD(page, enforce) ({					\
-		VM_BUG_ON_PGFLAGS(PageTail(page), page);		\
-		page;})
 #define PF_NO_TAIL(page, enforce) ({					\
 		VM_BUG_ON_PGFLAGS(enforce && PageTail(page), page);	\
 		compound_head(page);})
@@ -267,7 +254,6 @@ static inline int TestClearPage##uname(struct page *page) { return 0; }
 	TESTSETFLAG_FALSE(uname) TESTCLEARFLAG_FALSE(uname)
 
 __PAGEFLAG(Locked, locked, PF_NO_TAIL)
-PAGEFLAG(Waiters, waiters, PF_ONLY_HEAD) __CLEARPAGEFLAG(Waiters, waiters, PF_ONLY_HEAD)
 PAGEFLAG(Error, error, PF_NO_COMPOUND) TESTCLEARFLAG(Error, error, PF_NO_COMPOUND)
 PAGEFLAG(Referenced, referenced, PF_HEAD)
 	TESTCLEARFLAG(Referenced, referenced, PF_HEAD)
@@ -275,10 +261,9 @@ PAGEFLAG(Referenced, referenced, PF_HEAD)
 PAGEFLAG(Dirty, dirty, PF_HEAD) TESTSCFLAG(Dirty, dirty, PF_HEAD)
 	__CLEARPAGEFLAG(Dirty, dirty, PF_HEAD)
 PAGEFLAG(LRU, lru, PF_HEAD) __CLEARPAGEFLAG(LRU, lru, PF_HEAD)
+PAGEFLAG(UIDLRU, uidlru, PF_HEAD) __CLEARPAGEFLAG(UIDLRU, uidlru, PF_HEAD)
 PAGEFLAG(Active, active, PF_HEAD) __CLEARPAGEFLAG(Active, active, PF_HEAD)
 	TESTCLEARFLAG(Active, active, PF_HEAD)
-PAGEFLAG(Workingset, workingset, PF_HEAD)
-	TESTCLEARFLAG(Workingset, workingset, PF_HEAD)
 __PAGEFLAG(Slab, slab, PF_NO_TAIL)
 __PAGEFLAG(SlobFree, slob_free, PF_NO_TAIL)
 PAGEFLAG(Checked, checked, PF_NO_COMPOUND)	   /* Used by some filesystems */
@@ -320,15 +305,6 @@ PAGEFLAG(Reclaim, reclaim, PF_NO_TAIL)
 PAGEFLAG(Readahead, reclaim, PF_NO_COMPOUND)
 	TESTCLEARFLAG(Readahead, reclaim, PF_NO_COMPOUND)
 
-#ifdef CONFIG_MEMPLUS
-PAGEFLAG(Willneed, willneed, PF_HEAD)
-__CLEARPAGEFLAG(Willneed, willneed, PF_HEAD)
-#endif
-#ifdef CONFIG_SMART_BOOST
-PAGEFLAG(UIDLRU, uidlru, PF_HEAD) __CLEARPAGEFLAG(UIDLRU, uidlru, PF_HEAD)
-	__SETPAGEFLAG(UIDLRU, uidlru, PF_HEAD)
-#endif
-
 #ifdef CONFIG_HIGHMEM
 /*
  * Must use a macro here due to header dependency issues. page_zone() is not
@@ -340,27 +316,7 @@ PAGEFLAG_FALSE(HighMem)
 #endif
 
 #ifdef CONFIG_SWAP
-/* CONFIG_MEMPLUS modify start by bin.zhong@ASTI */
-#include <oneplus/memplus/memplus_helper.h>
-static __always_inline int PageSwapCache(struct page *page)
-{
-#ifdef CONFIG_THP_SWAP
-	page = compound_head(page);
-#endif
-	return PageSwapBacked(page) && test_bit(PG_swapcache, &page->flags);
-
-}
-
-static __always_inline void ClearPageSwapCache(struct page *page)
-{
-	memplus_move_swapcache_to_anon_lru(page);
-}
-
-static __always_inline void SetPageSwapCache(struct page *page)
-{
-	memplus_move_anon_to_swapcache_lru(page);
-}
-/* modify end */
+PAGEFLAG(SwapCache, swapcache, PF_NO_COMPOUND)
 #else
 PAGEFLAG_FALSE(SwapCache)
 #endif
@@ -591,28 +547,12 @@ static inline int PageTransCompound(struct page *page)
  *
  * Unlike PageTransCompound, this is safe to be called only while
  * split_huge_pmd() cannot run from under us, like if protected by the
- * MMU notifier, otherwise it may result in page->_mapcount check false
+ * MMU notifier, otherwise it may result in page->_mapcount < 0 false
  * positives.
- *
- * We have to treat page cache THP differently since every subpage of it
- * would get _mapcount inc'ed once it is PMD mapped.  But, it may be PTE
- * mapped in the current process so comparing subpage's _mapcount to
- * compound_mapcount to filter out PTE mapped case.
  */
 static inline int PageTransCompoundMap(struct page *page)
 {
-	struct page *head;
-
-	if (!PageTransCompound(page))
-		return 0;
-
-	if (PageAnon(page))
-		return atomic_read(&page->_mapcount) < 0;
-
-	head = compound_head(page);
-	/* File THP is PMD mapped and not PTE mapped */
-	return atomic_read(&page->_mapcount) ==
-	       atomic_read(compound_mapcount_ptr(head));
+	return PageTransCompound(page) && atomic_read(&page->_mapcount) < 0;
 }
 
 /*
@@ -797,7 +737,6 @@ static inline int page_has_private(struct page *page)
 
 #undef PF_ANY
 #undef PF_HEAD
-#undef PF_ONLY_HEAD
 #undef PF_NO_TAIL
 #undef PF_NO_COMPOUND
 #endif /* !__GENERATING_BOUNDS_H */

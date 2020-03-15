@@ -731,6 +731,8 @@ void pm_qos_add_request(struct pm_qos_request *req,
 	trace_pm_qos_add_request(pm_qos_class, value);
 	pm_qos_update_target(pm_qos_array[pm_qos_class]->constraints,
 			     req, PM_QOS_ADD_REQ, value);
+	/* Fixes rare panic */
+	req->pm_qos_class = pm_qos_class;
 
 #ifdef CONFIG_SMP
 	if (req->type == PM_QOS_REQ_AFFINE_IRQ &&
@@ -749,9 +751,6 @@ void pm_qos_add_request(struct pm_qos_request *req,
 		}
 	}
 #endif
-
-	/* Fixes rare panic */
-	req->pm_qos_class = pm_qos_class;
 }
 EXPORT_SYMBOL_GPL(pm_qos_add_request);
 
@@ -980,6 +979,9 @@ static ssize_t pm_qos_power_write(struct file *filp, const char __user *buf,
 {
 	s32 value;
 	struct pm_qos_request *req;
+
+	/* Don't let userspace impose restrictions on CPU idle levels */
+	return count;
 
 	if (count == sizeof(s32)) {
 		if (copy_from_user(&value, buf, sizeof(s32)))

@@ -59,10 +59,6 @@
 #else
 #define _ZONE ZONE_NORMAL
 #endif
-#include <linux/circ_buf.h>
-#include <linux/proc_fs.h>
-#include <linux/slab.h>
-#include <linux/poll.h>
 
 #define CREATE_TRACE_POINTS
 #include "trace/lowmemorykiller.h"
@@ -71,7 +67,7 @@
 static int enable_lmk = 1;
 module_param_named(enable_lmk, enable_lmk, int, 0644);
 
-static u32 lowmem_debug_level = 0;
+static u32 lowmem_debug_level = 1;
 static short lowmem_adj[6] = {
 	0,
 	1,
@@ -91,12 +87,7 @@ static int lowmem_minfree_size = 4;
 static int lmk_fast_run = 1;
 
 static unsigned long lowmem_deathpending_timeout;
-
-/*  bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-unsigned long get_max_minfree(void)
-{
-	return (unsigned long)lowmem_minfree[lowmem_minfree_size - 1];
-}
+unsigned long killed_num;
 
 #define lowmem_print(level, x...)			\
 	do {						\
@@ -104,6 +95,10 @@ unsigned long get_max_minfree(void)
 			pr_info(x);			\
 	} while (0)
 
+unsigned long get_max_minfree(void)
+{
+	return lowmem_minfree[lowmem_minfree_size - 1];
+}
 static unsigned long lowmem_count(struct shrinker *s,
 				  struct shrink_control *sc)
 {
@@ -488,7 +483,7 @@ static int time_measure = 1;
 module_param(time_measure, int, 0644);
 MODULE_PARM_DESC(time_measure, "lowmemorykiller select task time measurement");
 
-static bool trust_adj_chain = false;
+static bool trust_adj_chain = true;
 module_param(trust_adj_chain, bool, 0644);
 MODULE_PARM_DESC(trust_adj_chain, "lowmemorykiller trust adj chain to select task only from adj chain");
 
@@ -528,7 +523,6 @@ struct batch_kill_wrapper {
 	struct task_struct* selected;
 	int selected_tasksize;
 	short selected_oom_score_adj;
-	short min_score_adj;
 	u32 bklv;
 	u32 missed;
 	u32 scan;
@@ -649,8 +643,8 @@ static inline void lmk_stat_analysis(ktime_t begin, ktime_t end, s64 t,
 {
 	int i;
 
-	lowmem_print(1, "measure: analysis group: %s, begin: %lld, end: %lld, cost: %lldus, scan: %d, min_adj: %hd\n",
-		lmk_tags[g], ktime_to_us(begin), ktime_to_us(end), t, bkws[0].scan, bkws[0].min_score_adj);
+	lowmem_print(1, "measure: analysis group: %s, begin: %lld, end: %lld, cost: %lldus, scan: %d\n",
+		lmk_tags[g], ktime_to_us(begin), ktime_to_us(end), t, bkws[0].scan);
 
 	if (!quick_select) {
 		/* original selection measure */
@@ -731,8 +725,8 @@ static void time_measure_marker(enum measure_marker m, struct task_struct *tsk, 
 			}
 		}
 
-		/* record searching time longer than 12.8 ms*/
-		if (t >= lmk_t_delim[LMK_STAT_TIME_LV - 2])
+		/* record searching time longer than 1.6 ms or 12.8 ms depends on quick select enable or not */
+		if (t >= lmk_t_delim[LMK_STAT_TIME_LV - (quick_select? 5: 2)])
 			lmk_stat_analysis(begin, end, t, g, tsk, bkws);
 
 		lmk_stat_update(t, g, bkws);
@@ -920,6 +914,7 @@ static unsigned long lowmem_batch_kill(
 				continue;
 			}
 
+			killed_num++;
 			task_lock(selected);
 			send_sig(SIGKILL, selected, 0);
 			signaled = true;
@@ -936,7 +931,6 @@ static unsigned long lowmem_batch_kill(
 			lowmem_print(1, "batch Killing '%s' (%d) (tgid %d), adj %hd,\n"
 					"to free %ldkB on behalf of '%s' (%d) because\n"
 					"cache %ldkB is below limit %ldkB for oom score %hd\n"
-/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
 					"uid_lru_list size %ld pages\n"
 					"Free memory is %ldkB above reserved.\n"
 					"Free CMA is %ldkB\n"
@@ -952,8 +946,7 @@ static unsigned long lowmem_batch_kill(
 					current->comm, current->pid,
 					cache_size, cache_limit,
 					min_score_adj,
-/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-					UID_LRU_SIZE,
+					uid_lru_size(),
 					free,
 					global_page_state(NR_FREE_CMA_PAGES) *
 					(long)(PAGE_SIZE / 1024),
@@ -1004,6 +997,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 	int array_size = ARRAY_SIZE(lowmem_adj);
 	int other_free;
 	int other_file;
+	unsigned long uid_lru_total;
 
 	bool quick_select_enable = quick_select;
 	bool batch_kill_enable = batch_kill;
@@ -1013,6 +1007,8 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 #endif
 
 	batch_kill_init(bkws);
+
+	uid_lru_total = uid_lru_size();
 
 	if (!mutex_trylock(&scan_mutex))
 		return 0;
@@ -1035,6 +1031,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		array_size = lowmem_adj_size;
 	if (lowmem_minfree_size < array_size)
 		array_size = lowmem_minfree_size;
+
 	for (i = 0; i < array_size; i++) {
 		minfree = lowmem_minfree[i];
 		if (other_free < minfree && other_file < minfree) {
@@ -1066,9 +1063,6 @@ selftest_bypass:
 	selected_oom_score_adj = min_score_adj;
 
 	rcu_read_lock();
-
-	/* record for each time lmk scan's min_score_adj */
-	bkws[0].min_score_adj = min_score_adj;
 
 	/* marker for select begin */
 	time_measure_marker(MEASURE_START_MARKER, NULL, NULL);
@@ -1266,6 +1260,18 @@ quick_select_fast:
 
 	if (selected) {
 		long cache_size = other_file * (long)(PAGE_SIZE / 1024);
+		long uidlru_cache = uid_lru_total * (long)(PAGE_SIZE / 1024);
+		long anon_size = global_node_page_state(NR_ANON_MAPPED)
+					* (long)(PAGE_SIZE / 1024);
+		long slab_size = (global_page_state(NR_SLAB_RECLAIMABLE) +
+		    global_page_state(NR_SLAB_UNRECLAIMABLE))
+		    * (long)(PAGE_SIZE / 1024);
+		long unevictable_size =
+			global_node_page_state(NR_LRU_BASE + LRU_UNEVICTABLE)
+			* (long)(PAGE_SIZE / 1024);
+		long sreclaimable_size =
+			global_page_state(NR_SLAB_RECLAIMABLE)
+			* (long)(PAGE_SIZE / 1024);
 		long cache_limit = minfree * (long)(PAGE_SIZE / 1024);
 		long free = other_free * (long)(PAGE_SIZE / 1024);
 
@@ -1294,8 +1300,11 @@ quick_select_fast:
 		lowmem_print(1, "Killing '%s' (%d) (tgid %d), adj %hd,\n"
 			"to free %ldkB on behalf of '%s' (%d) because\n"
 			"cache %ldkB is below limit %ldkB for oom score %hd\n"
-/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-			"uid_lru_list size %ld pages\n"
+			"ramboost cache %ldkB\n"
+			"anon %ldkB\n"
+			"unevictable %ldkB\n"
+			"slab %ldkB\n"
+			"SReclaimable %ldkB\n"
 			"Free memory is %ldkB above reserved.\n"
 			"Free CMA is %ldkB\n"
 			"Total reserve is %ldkB\n"
@@ -1310,8 +1319,11 @@ quick_select_fast:
 			current->comm, current->pid,
 			cache_size, cache_limit,
 			min_score_adj,
-/* bin.zhong@ASTI add for CONFIG_SMART_BOOST */
-			UID_LRU_SIZE,
+			uidlru_cache,
+			anon_size,
+			unevictable_size,
+			slab_size,
+			sreclaimable_size,
 			free,
 			global_page_state(NR_FREE_CMA_PAGES) *
 			(long)(PAGE_SIZE / 1024),
@@ -1325,8 +1337,16 @@ quick_select_fast:
 			total_swapcache_pages() *
 			(long)(PAGE_SIZE / 1024),
 			sc->gfp_mask);
-
-		if (lowmem_debug_level >= 2 && selected_oom_score_adj == 0) {
+			for_each_process(tsk) {
+				int anno_size;
+				if (tsk->group_leader && tsk->group_leader->mm)
+					anno_size = get_mm_counter(tsk->group_leader->mm, MM_ANONPAGES);
+				else
+					continue;
+				if (anno_size > 256 && tsk->signal)
+					lowmem_print(1, "%s anno_size  %d adj %d\n", tsk->group_leader->comm, anno_size, tsk->signal->oom_score_adj);
+			}
+		if (lowmem_debug_level >= 0 && selected_oom_score_adj == 0) {
 			show_mem(SHOW_MEM_FILTER_NODES);
 			show_mem_call_notifiers();
 			dump_tasks(NULL, NULL);
@@ -1348,7 +1368,6 @@ quick_select_fast:
 	lowmem_print(4, "lowmem_scan %lu, %x, return %lu\n",
 		     sc->nr_to_scan, sc->gfp_mask, rem);
 	mutex_unlock(&scan_mutex);
-
 	return rem;
 }
 

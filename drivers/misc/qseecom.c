@@ -535,7 +535,7 @@ static int qseecom_scm_call2(uint32_t svc_id, uint32_t tz_cmd_id,
 			smc_id = TZ_OS_APP_SHUTDOWN_ID;
 			desc.arginfo = TZ_OS_APP_SHUTDOWN_ID_PARAM_ID;
 			desc.args[0] = req->app_id;
-			ret = scm_call2(smc_id, &desc);
+			ret = __qseecom_scm_call2_locked(smc_id, &desc);
 			break;
 		}
 		case QSEOS_APP_LOOKUP_COMMAND: {
@@ -1234,7 +1234,7 @@ static int qseecom_register_listener(struct qseecom_dev_handle *data,
 			pr_debug("register %d has to wait\n",
 				rcvd_lstnr.listener_id);
 			mutex_unlock(&listener_access_lock);
-			ret = wait_event_interruptible(
+			ret = wait_event_freezable(
 				qseecom.register_lsnr_pending_wq,
 				list_empty(
 				&qseecom.unregister_lsnr_pending_list_head));
@@ -1269,7 +1269,7 @@ static int qseecom_register_listener(struct qseecom_dev_handle *data,
 	new_entry->listener_in_use = false;
 	list_add_tail(&new_entry->list, &qseecom.registered_listener_list_head);
 
-	pr_debug("Service %d is registered\n", rcvd_lstnr.listener_id);
+	pr_warn("Service %d is registered\n", rcvd_lstnr.listener_id);
 	return ret;
 }
 
@@ -1328,7 +1328,7 @@ exit:
 	kzfree(ptr_svc);
 
 	data->released = true;
-	pr_debug("Service %d is unregistered\n", data->listener.id);
+	pr_warn("Service %d is unregistered\n", data->listener.id);
 	return ret;
 }
 
@@ -1417,7 +1417,7 @@ static void __wakeup_unregister_listener_kthread(void)
 static int __qseecom_unregister_listener_kthread_func(void *data)
 {
 	while (!kthread_should_stop()) {
-		wait_event_interruptible(
+		wait_event_freezable(
 			qseecom.unregister_lsnr_kthread_wq,
 			atomic_read(&qseecom.unregister_lsnr_kthread_state)
 				== LSNR_UNREG_KT_WAKEUP);
@@ -1953,7 +1953,6 @@ exit:
 
 	}
 	qseecom.app_block_ref_cnt--;
-	wake_up_interruptible_all(&qseecom.app_block_wq);
 	if (rc)
 		return rc;
 
@@ -2306,15 +2305,24 @@ exit:
  */
 static void __qseecom_reentrancy_check_if_no_app_blocked(uint32_t smc_id)
 {
+	sigset_t new_sigset, old_sigset;
+
 	if (qseecom.qsee_reentrancy_support > QSEE_REENTRANCY_PHASE_0 &&
 		qseecom.qsee_reentrancy_support < QSEE_REENTRANCY_PHASE_3 &&
 		IS_OWNER_TRUSTED_OS(TZ_SYSCALL_OWNER_ID(smc_id))) {
 		/* thread sleep until this app unblocked */
 		while (qseecom.app_block_ref_cnt > 0) {
+			sigfillset(&new_sigset);
+			sigprocmask(SIG_SETMASK, &new_sigset, &old_sigset);
 			mutex_unlock(&app_access_lock);
-			wait_event_interruptible(qseecom.app_block_wq,
-				(!qseecom.app_block_ref_cnt));
+			do {
+				if (!wait_event_interruptible(
+					qseecom.app_block_wq,
+					(qseecom.app_block_ref_cnt == 0)))
+					break;
+			} while (1);
 			mutex_lock(&app_access_lock);
+			sigprocmask(SIG_SETMASK, &old_sigset, NULL);
 		}
 	}
 }
@@ -2327,15 +2335,24 @@ static void __qseecom_reentrancy_check_if_no_app_blocked(uint32_t smc_id)
 static void __qseecom_reentrancy_check_if_this_app_blocked(
 			struct qseecom_registered_app_list *ptr_app)
 {
+	sigset_t new_sigset, old_sigset;
+
 	if (qseecom.qsee_reentrancy_support) {
 		ptr_app->check_block++;
 		while (ptr_app->app_blocked || qseecom.app_block_ref_cnt > 1) {
 			/* thread sleep until this app unblocked */
+			sigfillset(&new_sigset);
+			sigprocmask(SIG_SETMASK, &new_sigset, &old_sigset);
 			mutex_unlock(&app_access_lock);
-			wait_event_interruptible(qseecom.app_block_wq,
-				(!ptr_app->app_blocked &&
-				qseecom.app_block_ref_cnt <= 1));
+			do {
+				if (!wait_event_interruptible(
+					qseecom.app_block_wq,
+					(!ptr_app->app_blocked &&
+					qseecom.app_block_ref_cnt <= 1)))
+					break;
+			} while (1);
 			mutex_lock(&app_access_lock);
+			sigprocmask(SIG_SETMASK, &old_sigset, NULL);
 		}
 		ptr_app->check_block--;
 	}
@@ -3237,7 +3254,7 @@ int __qseecom_process_reentrancy(struct qseecom_command_scm_resp *resp,
 		ret = __qseecom_reentrancy_process_incomplete_cmd(data, resp);
 		ptr_app->app_blocked = false;
 		qseecom.app_block_ref_cnt--;
-		wake_up_interruptible_all(&qseecom.app_block_wq);
+		wake_up_interruptible(&qseecom.app_block_wq);
 		if (ret)
 			pr_err("process_incomplete_cmd failed err: %d\n",
 					ret);
@@ -4002,7 +4019,7 @@ static int qseecom_receive_req(struct qseecom_dev_handle *data)
 		if (wait_event_interruptible(this_lstnr->rcv_req_wq,
 				__qseecom_listener_has_rcvd_req(data,
 				this_lstnr))) {
-			pr_debug("Interrupted: exiting Listener Service = %d\n",
+			pr_warn("Interrupted: exiting Listener Service = %d\n",
 						(uint32_t)data->listener.id);
 			/* woken up for different reason */
 			return -ERESTARTSYS;
@@ -4697,6 +4714,7 @@ recheck:
 		strlcpy(entry->app_name, app_name, MAX_APP_NAME_SIZE);
 		if (__qseecom_get_fw_size(app_name, &fw_size, &app_arch)) {
 			ret = -EIO;
+			kfree(entry);
 			goto exit_entry_free;
 		}
 		entry->app_arch = app_arch;

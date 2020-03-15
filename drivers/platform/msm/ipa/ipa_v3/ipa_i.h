@@ -768,7 +768,7 @@ struct ipa3_ep_context {
 	bool keep_ipa_awake;
 	struct ipa3_wlan_stats wstats;
 	u32 uc_offload_state;
-	atomic_t disconnect_in_progress;
+	bool disconnect_in_progress;
 	u32 qmi_request_sent;
 	bool napi_enabled;
 	u32 eot_in_poll_err;
@@ -1607,7 +1607,6 @@ struct ipa3_context {
 	bool use_ipa_pm;
 	bool vlan_mode_iface[IPA_VLAN_IF_MAX];
 	bool wdi_over_pcie;
-	bool fw_loaded;
 };
 
 struct ipa3_plat_drv_res {
@@ -1925,10 +1924,7 @@ int ipa3_xdci_disconnect(u32 clnt_hdl, bool should_force_clear, u32 qmi_req_id);
 void ipa3_xdci_ep_delay_rm(u32 clnt_hdl);
 void ipa3_register_lock_unlock_callback(int (*client_cb)(bool), u32 ipa_ep_idx);
 void ipa3_deregister_lock_unlock_callback(u32 ipa_ep_idx);
-int ipa3_set_reset_client_prod_pipe_delay(bool set_reset,
-		enum ipa_client_type client);
-int ipa3_set_reset_client_cons_pipe_sus_holb(bool set_reset,
-		enum ipa_client_type client);
+void ipa3_set_usb_prod_pipe_delay(void);
 
 int ipa3_xdci_suspend(u32 ul_clnt_hdl, u32 dl_clnt_hdl,
 	bool should_force_clear, u32 qmi_req_id, bool is_dpl);

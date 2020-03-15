@@ -1255,9 +1255,6 @@ static struct page **__iommu_alloc_buffer(struct device *dev, size_t size,
 	size_t array_size = count * sizeof(struct page *);
 	int i = 0;
 	bool is_coherent = is_dma_coherent(dev, attrs);
-	struct dma_iommu_mapping *mapping = dev->archdata.mapping;
-	unsigned int alloc_sizes = mapping->domain->pgsize_bitmap;
-	unsigned long order_mask;
 
 	if (array_size <= PAGE_SIZE)
 		pages = kzalloc(array_size, gfp);
@@ -1286,26 +1283,13 @@ static struct page **__iommu_alloc_buffer(struct device *dev, size_t size,
 	 * IOMMU can map any pages, so himem can also be used here
 	 */
 	gfp |= __GFP_NOWARN | __GFP_HIGHMEM;
-	order_mask = alloc_sizes >> PAGE_SHIFT;
-	order_mask &= (2U << MAX_ORDER) - 1;
-	if (!order_mask)
-		goto error;
 
 	while (count) {
-		int j, order;
+		int j, order = __fls(count);
 
-		order_mask &= (2U << __fls(count)) - 1;
-		order = __fls(order_mask);
-
-		pages[i] = alloc_pages(order ? (gfp | __GFP_NORETRY) &
-					~__GFP_RECLAIM : gfp, order);
-		while (!pages[i] && order) {
-			order_mask &= ~(1U << order);
-			order = __fls(order_mask);
-			pages[i] = alloc_pages(order ? (gfp | __GFP_NORETRY) &
-					~__GFP_RECLAIM : gfp, order);
-		}
-
+		pages[i] = alloc_pages(gfp, order);
+		while (!pages[i] && order)
+			pages[i] = alloc_pages(gfp, --order);
 		if (!pages[i])
 			goto error;
 

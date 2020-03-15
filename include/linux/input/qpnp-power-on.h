@@ -50,7 +50,6 @@ enum pon_power_off_type {
 	PON_POWER_OFF_MAX_TYPE		= 0x10,
 };
 
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 struct qpnp_pon {
 	struct platform_device	*pdev;
 	struct regmap		*regmap;
@@ -59,9 +58,9 @@ struct qpnp_pon {
 	struct pon_regulator	*pon_reg_cfg;
 	struct list_head	list;
 	struct delayed_work	bark_work;
-	struct delayed_work	press_work;
+	struct delayed_work     press_work;
 	struct work_struct  up_work;
-    atomic_t       press_count;
+	atomic_t	   press_count;
 	struct dentry		*debugfs;
 	struct device_node      *pbs_dev_node;
 	int			pon_trigger_reason;

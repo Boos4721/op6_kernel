@@ -21,7 +21,6 @@
 	model = "Qualcomm Technologies, Inc. APQ8017-CDP \
 					with WCD codec/Rome card";
 	qcom,board-id = <1 2>;
-	qcom,msm-id = <307 0x0>;
 };
 
 &blsp1_uart1 {

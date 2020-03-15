@@ -526,19 +526,9 @@ int pwm_apply_state(struct pwm_device *pwm, struct pwm_state *state)
 
 		if (state->period != pwm->state.period ||
 		    state->duty_cycle != pwm->state.duty_cycle) {
-			if (pwm->chip->ops->config_extend) {
-				err = pwm->chip->ops->config_extend(pwm->chip,
-						pwm, state->duty_cycle,
-						state->period);
-			} else {
-				if (state->period > UINT_MAX)
-					pr_warn("period %llu duty_cycle %llu will be truncated\n",
-							state->period,
-							state->duty_cycle);
-				err = pwm->chip->ops->config(pwm->chip, pwm,
-						state->duty_cycle,
-						state->period);
-			}
+			err = pwm->chip->ops->config(pwm->chip, pwm,
+						     state->duty_cycle,
+						     state->period);
 			if (err)
 				return err;
 
@@ -887,14 +877,13 @@ void pwm_put(struct pwm_device *pwm)
 	mutex_lock(&pwm_lock);
 
 	if (!test_and_clear_bit(PWMF_REQUESTED, &pwm->flags)) {
-		pr_debug("PWM device already freed\n");
+		pr_warn("PWM device already freed\n");
 		goto out;
 	}
 
 	if (pwm->chip->ops->free)
 		pwm->chip->ops->free(pwm->chip, pwm);
 
-	pwm_set_chip_data(pwm, NULL);
 	pwm->label = NULL;
 
 	module_put(pwm->chip->ops->owner);
@@ -1028,8 +1017,8 @@ static void pwm_dbg_show(struct pwm_chip *chip, struct seq_file *s)
 		if (state.enabled)
 			seq_puts(s, " enabled");
 
-		seq_printf(s, " period: %llu ns", state.period);
-		seq_printf(s, " duty: %llu ns", state.duty_cycle);
+		seq_printf(s, " period: %u ns", state.period);
+		seq_printf(s, " duty: %u ns", state.duty_cycle);
 		seq_printf(s, " polarity: %s",
 			   state.polarity ? "inverse" : "normal");
 

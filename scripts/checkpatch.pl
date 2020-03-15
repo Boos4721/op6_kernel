@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 # (c) 2001, Dave Jones. (the file handling bit)
 # (c) 2005, Joel Schopp <jschopp@austin.ibm.com> (the ugly bit)
 # (c) 2007,2008, Andy Whitcroft <apw@uk.ibm.com> (new conditions, test suite)
@@ -6,6 +6,7 @@
 # Licensed under the terms of the GNU GPL License version 2
 
 use strict;
+use warnings;
 use POSIX;
 use File::Basename;
 use Cwd 'abs_path';
@@ -16,7 +17,7 @@ use constant IN_SHORTTEXT_BLANKLINE => 1;
 use constant IN_SHORTTEXT => 2;
 use constant AFTER_SHORTTEXT => 3;
 use constant CHECK_NEXT_SHORTTEXT => 4;
-use constant SHORTTEXT_LIMIT => 120;
+use constant SHORTTEXT_LIMIT => 75;
 
 my $P = $0;
 my $D = dirname(abs_path($P));
@@ -55,7 +56,7 @@ my %ignore_type = ();
 my @ignore = ();
 my $help = 0;
 my $configuration_file = ".checkpatch.conf";
-my $max_line_length = 120;
+my $max_line_length = 80;
 my $ignore_perl_version = 0;
 my $minimum_perl_version = 5.10.0;
 my $min_conf_desc_length = 4;
@@ -2618,7 +2619,7 @@ sub process {
 			$sig_nospace =~ s/\s//g;
 			$sig_nospace = lc($sig_nospace);
 			if (defined $signatures{$sig_nospace}) {
-				WARN("DUPLICATE_SIGN_OFF",
+				WARN("BAD_SIGN_OFF",
 				     "Duplicate signature\n" . $herecurr);
 			} else {
 				$signatures{$sig_nospace} = 1;
@@ -2654,9 +2655,9 @@ sub process {
 			$commit_log_possible_stack_dump = 1;
 		}
 
-# Check for line lengths > 120 in commit log, warn once
+# Check for line lengths > 75 in commit log, warn once
 		if ($in_commit_log && !$commit_log_long_line &&
-		    length($line) > 120 &&
+		    length($line) > 75 &&
 		    !($line =~ /^\s*[a-zA-Z0-9_\/\.]+\s+\|\s+\d+/ ||
 					# file delta changes
 		      $line =~ /^\s*(?:[\w\.\-]+\/)++[\w\.\-]+:/ ||
@@ -2665,7 +2666,7 @@ sub process {
 					# A Fixes: or Link: line
 		      $commit_log_possible_stack_dump)) {
 			WARN("COMMIT_LOG_LONG_LINE",
-			     "Possible unwrapped commit description (prefer a maximum 120 chars per line)\n" . $herecurr);
+			     "Possible unwrapped commit description (prefer a maximum 75 chars per line)\n" . $herecurr);
 			$commit_log_long_line = 1;
 		}
 
@@ -3676,6 +3677,7 @@ sub process {
 				fix_insert_line($fixlinenr, $fixedline);
 			}
 		}
+
 #
 # Checks which are anchored on the added line.
 #
@@ -5870,32 +5872,6 @@ sub process {
 				    $fix) {
 					$fixed[$fixlinenr] =~ s/\bseq_printf\b/seq_puts/;
 				}
-			}
-		}
-
-		# check for vsprintf extension %p<foo> misuses
-		if ($^V && $^V ge 5.10.0 &&
-		    defined $stat &&
-		    $stat =~ /^\+(?![^\{]*\{\s*).*\b(\w+)\s*\(.*$String\s*,/s &&
-		    $1 !~ /^_*volatile_*$/) {
-			my $bad_extension = "";
-			my $lc = $stat =~ tr@\n@@;
-			$lc = $lc + $linenr;
-		        for (my $count = $linenr; $count <= $lc; $count++) {
-				my $fmt = get_quoted_string($lines[$count - 1], raw_line($count, 0));
-				$fmt =~ s/%%//g;
-				if ($fmt =~ /(\%[\*\d\.]*p(?![\WFfSsBKRraEhMmIiUDdgVCbGNOx]).)/) {
-					$bad_extension = $1;
-					last;
-				}
-			}
-			if ($bad_extension ne "") {
-				my $stat_real = raw_line($linenr, 0);
-				for (my $count = $linenr + 1; $count <= $lc; $count++) {
-					$stat_real = $stat_real . "\n" . raw_line($count, 0);
-				}
-				WARN("VSPRINTF_POINTER_EXTENSION",
-				     "Invalid vsprintf pointer extension '$bad_extension'\n" . "$here\n$stat_real\n");
 			}
 		}
 

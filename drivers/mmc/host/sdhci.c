@@ -149,7 +149,6 @@ static void sdhci_dumpregs(struct sdhci_host *host)
 	}
 
 	host->mmc->err_occurred = true;
-	host->mmc->last_failed_rq_time = ktime_get();
 
 	if (host->ops->dump_vendor_regs)
 		host->ops->dump_vendor_regs(host);
@@ -1144,8 +1143,6 @@ static void sdhci_finish_data(struct sdhci_host *host)
 	host->data = NULL;
 	host->data_cmd = NULL;
 
-	MMC_TRACE(host->mmc, "%s: 0x24=0x%08x\n", __func__,
-		sdhci_readl(host, SDHCI_PRESENT_STATE));
 	/*
 	 * The controller needs a reset of internal state machines upon error
 	 * conditions.
@@ -1156,6 +1153,8 @@ static void sdhci_finish_data(struct sdhci_host *host)
 		sdhci_do_reset(host, SDHCI_RESET_DATA);
 	}
 
+	MMC_TRACE(host->mmc, "%s: 0x24=0x%08x\n", __func__,
+		sdhci_readl(host, SDHCI_PRESENT_STATE));
 	if ((host->flags & (SDHCI_REQ_USE_DMA | SDHCI_USE_ADMA)) ==
 	    (SDHCI_REQ_USE_DMA | SDHCI_USE_ADMA))
 		sdhci_adma_table_post(host, data);
@@ -2578,7 +2577,7 @@ static int sdhci_execute_tuning(struct mmc_host *mmc, u32 opcode)
 		spin_lock_irqsave(&host->lock, flags);
 
 		if (!host->tuning_done) {
-			pr_debug(DRIVER_NAME ": Timeout waiting for Buffer Read Ready interrupt during tuning procedure, falling back to fixed sampling clock\n");
+			pr_info(DRIVER_NAME ": Timeout waiting for Buffer Read Ready interrupt during tuning procedure, falling back to fixed sampling clock\n");
 			ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
 			ctrl &= ~SDHCI_CTRL_TUNED_CLK;
 			ctrl &= ~SDHCI_CTRL_EXEC_TUNING;
@@ -3035,11 +3034,6 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask, u32 *intmask_p)
 		}
 
 		/* Treat data command CRC error the same as data CRC error */
-
-		/*
-		 * Even in case of cmd INDEX OR ENDBIT error we
-		 * handle it the same way.
-		 */
 		if (host->cmd->data &&
 		    (((intmask & (SDHCI_INT_CRC | SDHCI_INT_TIMEOUT)) ==
 		     SDHCI_INT_CRC) || (host->cmd->error == -EILSEQ))) {
@@ -3281,7 +3275,7 @@ static int sdhci_get_data_err(struct sdhci_host *host, u32 intmask)
 	} else if (intmask & (SDHCI_INT_DATA_END_BIT | SDHCI_INT_DATA_CRC)) {
 		host->mmc->err_stats[MMC_ERR_DAT_CRC]++;
 		return -EILSEQ;
-	} else if (intmask & SDHCI_INT_ADMA_ERROR) {
+	} else if (intmask & MMC_ERR_ADMA) {
 		host->mmc->err_stats[MMC_ERR_ADMA]++;
 		return -EIO;
 	}
@@ -3293,18 +3287,13 @@ static irqreturn_t sdhci_cmdq_irq(struct sdhci_host *host, u32 intmask)
 	int err = 0;
 	u32 mask = 0;
 	irqreturn_t ret;
-	bool is_cmd_err = false;
 
-	if (intmask & SDHCI_INT_CMD_MASK) {
+	if (intmask & SDHCI_INT_CMD_MASK)
 		err = sdhci_get_cmd_err(host, intmask);
-		is_cmd_err = true;
-	} else if (intmask & SDHCI_INT_DATA_MASK) {
+	else if (intmask & SDHCI_INT_DATA_MASK)
 		err = sdhci_get_data_err(host, intmask);
-		if (intmask & SDHCI_INT_DATA_TIMEOUT)
-			is_cmd_err = sdhci_card_busy(host->mmc);
-	}
 
-	ret = cmdq_irq(host->mmc, err, is_cmd_err);
+	ret = cmdq_irq(host->mmc, err);
 	if (err) {
 		/* Clear the error interrupts */
 		mask = intmask & SDHCI_INT_ERROR_MASK;
@@ -4218,13 +4207,11 @@ int sdhci_setup_host(struct sdhci_host *host)
 	if (host->ops->get_min_clock)
 		mmc->f_min = host->ops->get_min_clock(host);
 	else if (host->version >= SDHCI_SPEC_300) {
-		if (host->clk_mul)
+		if (host->clk_mul) {
+			mmc->f_min = (host->max_clk * host->clk_mul) / 1024;
 			max_clk = host->max_clk * host->clk_mul;
-		/*
-		 * Divided Clock Mode minimum clock rate is always less than
-		 * Programmable Clock Mode minimum clock rate.
-		 */
-		mmc->f_min = host->max_clk / SDHCI_MAX_DIV_SPEC_300;
+		} else
+			mmc->f_min = host->max_clk / SDHCI_MAX_DIV_SPEC_300;
 	} else
 		mmc->f_min = host->max_clk / SDHCI_MAX_DIV_SPEC_200;
 

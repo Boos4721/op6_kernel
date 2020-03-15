@@ -667,13 +667,10 @@ static ssize_t cyc_threshold_store(struct device *dev,
 
 	if (kstrtoul(buf, 16, &val))
 		return -EINVAL;
-
-	/* mask off max threshold before checking min value */
-	val &= ETM_CYC_THRESHOLD_MASK;
 	if (val < drvdata->ccitmin)
 		return -EINVAL;
 
-	config->ccctlr = val;
+	config->ccctlr = val & ETM_CYC_THRESHOLD_MASK;
 	return size;
 }
 static DEVICE_ATTR_RW(cyc_threshold);
@@ -704,16 +701,14 @@ static ssize_t bb_ctrl_store(struct device *dev,
 		return -EINVAL;
 	if (!drvdata->nr_addr_cmp)
 		return -EINVAL;
-
 	/*
-	 * Bit[8] controls include(1) / exclude(0), bits[0-7] select
-	 * individual range comparators. If include then at least 1
-	 * range must be selected.
+	 * Bit[7:0] selects which address range comparator is used for
+	 * branch broadcast control.
 	 */
-	if ((val & BIT(8)) && (BMVAL(val, 0, 7) == 0))
+	if (BMVAL(val, 0, 7) > drvdata->nr_addr_cmp)
 		return -EINVAL;
 
-	config->bb_ctrl = val & GENMASK(8, 0);
+	config->bb_ctrl = val;
 	return size;
 }
 static DEVICE_ATTR_RW(bb_ctrl);
@@ -1346,8 +1341,8 @@ static ssize_t seq_event_store(struct device *dev,
 
 	spin_lock(&drvdata->spinlock);
 	idx = config->seq_idx;
-	/* Seq control has two masks B[15:8] F[7:0] */
-	config->seq_ctrl[idx] = val & 0xFFFF;
+	/* RST, bits[7:0] */
+	config->seq_ctrl[idx] = val & 0xFF;
 	spin_unlock(&drvdata->spinlock);
 	return size;
 }
@@ -1602,7 +1597,7 @@ static ssize_t res_ctrl_store(struct device *dev,
 	if (idx % 2 != 0)
 		/* PAIRINV, bit[21] */
 		val &= ~BIT(21);
-	config->res_ctrl[idx] = val & GENMASK(21, 0);
+	config->res_ctrl[idx] = val;
 	spin_unlock(&drvdata->spinlock);
 	return size;
 }
@@ -2078,16 +2073,16 @@ static u32 etmv4_cross_read(const struct device *dev, u32 offset)
 	coresight_simple_func(struct etmv4_drvdata, etmv4_cross_read,	\
 			      name, offset)
 
-coresight_etm4x_cross_read(trcpdcr, TRCPDCR);
-coresight_etm4x_cross_read(trcpdsr, TRCPDSR);
-coresight_etm4x_cross_read(trclsr, TRCLSR);
-coresight_etm4x_cross_read(trcauthstatus, TRCAUTHSTATUS);
-coresight_etm4x_cross_read(trcdevid, TRCDEVID);
-coresight_etm4x_cross_read(trcdevtype, TRCDEVTYPE);
-coresight_etm4x_cross_read(trcpidr0, TRCPIDR0);
-coresight_etm4x_cross_read(trcpidr1, TRCPIDR1);
-coresight_etm4x_cross_read(trcpidr2, TRCPIDR2);
-coresight_etm4x_cross_read(trcpidr3, TRCPIDR3);
+coresight_etm4x_simple_func(trcpdcr, TRCPDCR);
+coresight_etm4x_simple_func(trcpdsr, TRCPDSR);
+coresight_etm4x_simple_func(trclsr, TRCLSR);
+coresight_etm4x_simple_func(trcauthstatus, TRCAUTHSTATUS);
+coresight_etm4x_simple_func(trcdevid, TRCDEVID);
+coresight_etm4x_simple_func(trcdevtype, TRCDEVTYPE);
+coresight_etm4x_simple_func(trcpidr0, TRCPIDR0);
+coresight_etm4x_simple_func(trcpidr1, TRCPIDR1);
+coresight_etm4x_simple_func(trcpidr2, TRCPIDR2);
+coresight_etm4x_simple_func(trcpidr3, TRCPIDR3);
 coresight_etm4x_cross_read(trcoslsr, TRCOSLSR);
 coresight_etm4x_cross_read(trcconfig, TRCCONFIGR);
 coresight_etm4x_cross_read(trctraceid, TRCTRACEIDR);

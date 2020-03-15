@@ -14,7 +14,6 @@
 #define _IPC_LOGGING_H
 
 #include <linux/types.h>
-#include <linux/err.h>
 
 #define MAX_MSG_SIZE 255
 

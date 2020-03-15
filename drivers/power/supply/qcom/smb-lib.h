@@ -18,7 +18,6 @@
 #include <linux/regulator/driver.h>
 #include <linux/regulator/consumer.h>
 
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 #include <linux/power/oem_external_fg.h>
 #include <linux/extcon.h>
 #include "storm-watch.h"
@@ -29,11 +28,9 @@ enum print_reason {
 	PR_MISC		= BIT(2),
 	PR_PARALLEL	= BIT(3),
 	PR_OTG		= BIT(4),
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	PR_OP_DEBUG	= BIT(5),
 };
 
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 #define BATT_TYPE_FCC_VOTER "BATT_TYPE_FCC_VOTER"
 #define PSY_ICL_VOTER		"PSY_ICL_VOTER"
 #define TEMP_REGION_MAX               9
@@ -92,9 +89,6 @@ enum print_reason {
 #define MOISTURE_VOTER			"MOISTURE_VOTER"
 #define HVDCP2_ICL_VOTER		"HVDCP2_ICL_VOTER"
 #define OV_VOTER			"OV_VOTER"
-#define FG_ESR_VOTER			"FG_ESR_VOTER"
-#define FCC_STEPPER_VOTER		"FCC_STEPPER_VOTER"
-#define PD_NOT_SUPPORTED_VOTER		"PD_NOT_SUPPORTED_VOTER"
 
 #define VCONN_MAX_ATTEMPTS	3
 #define OTG_MAX_ATTEMPTS	3
@@ -282,9 +276,7 @@ struct smb_charger {
 	struct mutex		ps_change_lock;
 	struct mutex		otg_oc_lock;
 	struct mutex		vconn_oc_lock;
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	struct mutex		sw_dash_lock;
-/*yangfb@bsp, 20180302,enable stm6620 sheepmode */
 	struct pinctrl_state *pinctrl_state_default;
 	struct pinctrl *pinctrl;
 	/* power supplies */
@@ -299,7 +291,6 @@ struct smb_charger {
 
 	/* notifiers */
 	struct notifier_block	nb;
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 #if defined(CONFIG_FB)
 	struct notifier_block		fb_notif;
 #elif defined(CONFIG_MSM_RDM_NOTIFY)
@@ -316,7 +307,6 @@ struct smb_charger {
 
 	/* votables */
 	struct votable		*dc_suspend_votable;
-/*infi@bsp, 2018/07/10 Add otg toggle vote optimize otg_switch set flow*/
 	struct votable		*otg_toggle_votable;
 	struct votable		*fcc_votable;
 	struct votable		*fv_votable;
@@ -342,7 +332,6 @@ struct smb_charger {
 	struct work_struct	rdstd_cc2_detach_work;
 	struct delayed_work	hvdcp_detect_work;
 	struct delayed_work	ps_change_timeout_work;
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	struct delayed_work rechk_sw_dsh_work;
 	struct delayed_work	re_kick_work;
 	struct delayed_work	recovery_suspend_work;
@@ -370,7 +359,6 @@ struct smb_charger {
 	struct delayed_work	bb_removal_work;
 
 	/* cached status */
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 	int				BATT_TEMP_T0;
 	int				BATT_TEMP_T1;
 	int				BATT_TEMP_T2;
@@ -391,7 +379,6 @@ struct smb_charger {
 	int				vbatmax[TEMP_REGION_MAX];
 	int				vbatdet[TEMP_REGION_MAX];
 	int				temp_littel_cool_voltage;
-	int				temp_littel_cool_low_current;
 	int				fake_chgvol;
 	int				fake_temp;
 	int				fake_protect_sts;
@@ -469,7 +456,6 @@ struct smb_charger {
 	bool			otg_en;
 	bool			vconn_en;
 	bool			suspend_input_on_debug_batt;
-	/*yangfb@bsp, 20181023 icl set 1A if battery lower than 15%*/
 	bool			OTG_ICL_CTRL;
 	int			OTG_LOW_BAT;
 	int			OTG_LOW_BAT_ICL;
@@ -497,8 +483,6 @@ struct smb_charger {
 	bool			otg_present;
 	bool			is_audio_adapter;
 	bool			disable_stat_sw_override;
-	bool			in_chg_lock;
-	bool			fcc_stepper_enable;
 
 	/* workaround flag */
 	u32			wa_flags;
@@ -510,7 +494,6 @@ struct smb_charger {
 	int			qc2_max_pulses;
 	bool			non_compliant_chg_detected;
 	bool			fake_usb_insertion;
-	bool			reddragon_ipc_wa;
 
 	/* extcon for VBUS / ID notification to USB for uUSB */
 	struct extcon_dev	*extcon;
@@ -526,7 +509,6 @@ struct smb_charger {
 	int			die_health;
 };
 
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 int smblib_set_prop_charge_parameter_set(struct smb_charger *chg);
 extern void set_mcu_en_gpio_value(int value);
 extern void usb_sw_gpio_set(int value);
@@ -609,7 +591,6 @@ int smblib_set_prop_batt_status(struct smb_charger *chg,
 				const union power_supply_propval *val);
 int smblib_set_prop_system_temp_level(struct smb_charger *chg,
 				const union power_supply_propval *val);
-/* david.liu@bsp, 20171023 Battery & Charging porting */
 void op_bus_vote(int disable);
 int get_prop_fast_adapter_update(struct smb_charger *chg);
 void op_handle_usb_plugin(struct smb_charger *chg);

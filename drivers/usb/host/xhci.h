@@ -1880,7 +1880,6 @@ int xhci_run(struct usb_hcd *hcd);
 void xhci_stop(struct usb_hcd *hcd);
 void xhci_shutdown(struct usb_hcd *hcd);
 int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks);
-void xhci_shutdown(struct usb_hcd *hcd);
 void xhci_init_driver(struct hc_driver *drv,
 		      const struct xhci_driver_overrides *over);
 
@@ -2023,7 +2022,6 @@ static inline struct xhci_ring *xhci_urb_to_transfer_ring(struct xhci_hcd *xhci,
 int xhci_submit_single_step_set_feature(struct usb_hcd *hcd, struct urb *urb,
 					int is_setup);
 
-/*2018/03/19 handle xiaomi typec headset dsp crash issue*/
 extern void kick_usbpd_vbus_sm(void);
 extern unsigned int connected_usb_idVendor;
 extern unsigned int connected_usb_idProduct;
