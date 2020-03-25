@@ -144,4 +144,12 @@ config FB_MSM_MDSS_FRC_DEBUG
 	statistics and check whether its output pattern matches expected
 	cadence.
 
+config FLIKER_FREE
+	bool "Enable fliker free driver"
+	depends on FB_MSM_MDSS_KCAL_CTRL
+	help
+          The fliker free provides fliker free function without change
+          panel hardware brightness to avoid PWM flicker on OLED devices.
+
+
 endif
