@@ -2,6 +2,7 @@
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/slab.h>
 #include <asm/uaccess.h>
 
 #include "fliker_free.h"
@@ -49,11 +50,22 @@ static ssize_t my_write_procmem( struct file *file, const char __user *buffer,
 static ssize_t my_write_procbright( struct file *file, const char __user *buffer,
                             size_t count, loff_t *pos)
 {
-    int value;
-    value = 0;
-    sscanf(buffer, "%d", &value);
-    set_elvss_off_threshold(value);
-    //printk("elvss min brightness = %d", elvss_off_threshold);
+    int value = 0;
+    char *tmp = kzalloc((count+1), GFP_KERNEL);  
+    if(!tmp)  
+        return -ENOMEM;  
+    if(copy_from_user(tmp, buffer, count))  
+    {  
+        kfree(tmp);  
+        return EFAULT;  
+    }  
+    if(!kstrtoint(tmp,10,&value))
+    {
+        set_elvss_off_threshold(value);
+    }else{
+        return EFAULT;
+    }
+    
     return count;
 }
 
