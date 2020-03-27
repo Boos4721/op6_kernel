@@ -32,7 +32,11 @@
 
 
 struct mdss_panel_data *pdata;
+struct mdss_mdp_ctl *fb0_ctl = 0;
+u32 copyback = 0;
+static bool pcc_enabled;
 static bool mdss_backlight_enable = false;
+static u32 backlight;
 
 
 static void set_rgb_brightness(int r,int g,int b)
@@ -53,8 +57,8 @@ static void set_brightness(int backlight)
 u32 mdss_panel_calc_backlight(u32 bl_lvl)
 {
 	if (mdss_backlight_enable && bl_lvl != 0 && bl_lvl < elvss_off_threshold) {
-        printk("fliker free mode on\n");
-		printk("elvss_off = %d\n", elvss_off_threshold);
+        //printk("fliker free mode on\n");
+		//printk("elvss_off = %d\n", elvss_off_threshold);
 		set_brightness(bl_lvl);
 		return elvss_off_threshold;
 	}else{
@@ -68,8 +72,18 @@ void set_fliker_free(bool enabled)
 {
 	mdss_backlight_enable = enabled;
 	pdata = dev_get_platdata(&get_mfd_copy()->pdev->dev);
-	pdata->set_backlight(pdata, mdss_panel_calc_backlight(get_bkl_lvl()));
-} 
+	pcc_enabled = enabled;
+	if (pcc_enabled){
+		backlight = mdss_panel_calc_backlight(get_bkl_lvl());
+		//printk("hook backlight: %d\n",backlight);
+		pdata->set_backlight(pdata,backlight);
+	}else{
+		backlight = get_bkl_lvl();
+		//printk("hook backlight: %d, not effect \n",backlight);
+		pdata->set_backlight(pdata,backlight);
+		mdss_panel_calc_backlight(get_bkl_lvl());
+	}
+}
 
 void set_elvss_off_threshold(int value)
 {
