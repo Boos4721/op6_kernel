@@ -1801,7 +1801,7 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 					NOTIFY_TYPE_BL_AD_ATTEN_UPDATE);
 			mdss_fb_bl_update_notify(mfd, NOTIFY_TYPE_BL_UPDATE);
 			#ifdef CONFIG_FLIKER_FREE
-				//printk("backlight sent to panel :%d\n", mdss_panel_calc_backlight(temp));
+				//pr_debug("backlight sent to panel :%d\n", temp);
 				ff_mfd_copy = mfd;
 				ff_bkl_lvl_cpy = temp;
 				pdata->set_backlight(pdata, mdss_panel_calc_backlight(temp));
