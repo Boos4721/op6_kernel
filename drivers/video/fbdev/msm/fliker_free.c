@@ -65,6 +65,7 @@ static int fliker_free_push_dither(int depth)
 
 static int fliker_free_push_pcc(int temp)
 {
+	int i,ret = 0;
 	pcc_config.ops = pcc_enabled ?
 		MDP_PP_OPS_WRITE | MDP_PP_OPS_ENABLE :
 			MDP_PP_OPS_WRITE | MDP_PP_OPS_DISABLE;
@@ -76,7 +77,16 @@ static int fliker_free_push_pcc(int temp)
 	payload->b.b = pcc_config.b.b;
 	pcc_config.cfg_payload = payload;
 	
-	return mdss_mdp_pcc_config(get_mfd_copy(), &pcc_config, &copyback);
+	ret = mdss_mdp_pcc_config(get_mfd_copy(), &pcc_config, &copyback);
+	if(mdss_backlight_enable && !ret){
+		pcc_config.ops = MDP_PP_OPS_READ;
+		pcc_config.r.r = 0;
+		for(i=0;i<2000;i++){
+			mdss_mdp_pcc_config(get_mfd_copy(), &pcc_config, &copyback);
+			if(pcc_config.r.r == temp) return 0;
+		}
+	}
+	return ret;
 }
 
 static int set_brightness(int backlight)
@@ -107,8 +117,8 @@ u32 mdss_panel_calc_backlight(u32 bl_lvl)
 		if(!set_brightness(bl_lvl))
 			return elvss_off_threshold;
 	}else{
-		if(!set_brightness(elvss_off_threshold))
-			return bl_lvl;
+		if(bl_lvl)
+			set_brightness(elvss_off_threshold);
 	}
 	return bl_lvl;
 }
