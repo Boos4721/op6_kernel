@@ -32,7 +32,6 @@
 
 
 struct mdss_panel_data *pdata;
-struct mdss_mdp_ctl *fb0_ctl = 0;
 struct mdp_pcc_cfg_data pcc_config;
 struct mdp_pcc_data_v1_7 *payload;
 struct mdp_dither_cfg_data dither_config;
