@@ -64,7 +64,7 @@ static int fliker_free_push_dither(int depth)
 
 static int fliker_free_push_pcc(int temp)
 {
-	int i,ret = 0;
+	int ret = 0;
 	pcc_config.ops = pcc_enabled ?
 		MDP_PP_OPS_WRITE | MDP_PP_OPS_ENABLE :
 			MDP_PP_OPS_WRITE | MDP_PP_OPS_DISABLE;
@@ -77,14 +77,6 @@ static int fliker_free_push_pcc(int temp)
 	pcc_config.cfg_payload = payload;
 	
 	ret = mdss_mdp_pcc_config(get_mfd_copy(), &pcc_config, &copyback);
-	if(mdss_backlight_enable && !ret){
-		pcc_config.ops = MDP_PP_OPS_READ;
-		pcc_config.r.r = 0;
-		for(i=0;i<2000;i++){
-			mdss_mdp_pcc_config(get_mfd_copy(), &pcc_config, &copyback);
-			if(pcc_config.r.r == temp) return 0;
-		}
-	}
 	return ret;
 }
 
