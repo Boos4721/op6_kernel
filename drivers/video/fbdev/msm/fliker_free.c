@@ -127,8 +127,8 @@ static int set_brightness(int backlight)
 u32 mdss_panel_calc_backlight(u32 bl_lvl)
 {
 	if (mdss_backlight_enable && bl_lvl != 0 && bl_lvl < elvss_off_threshold) {
-        pr_err("fliker free mode on\n");
-		pr_err("elvss_off = %d, backlight_level = %d\n", elvss_off_threshold,bl_lvl);
+        pr_debug("fliker free mode on\n");
+		pr_debug("elvss_off = %d, backlight_level = %d\n", elvss_off_threshold,bl_lvl);
 		if(!set_brightness(bl_lvl))
 			return elvss_off_threshold;
 	}else{
