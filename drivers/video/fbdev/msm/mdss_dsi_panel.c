@@ -993,6 +993,12 @@ static void mdss_dsi_panel_off_hdmi(struct mdss_dsi_ctrl_pdata *ctrl,
 		mdss_dba_utils_video_off(pinfo->dba_data);
 		mdss_dba_utils_hdcp_enable(pinfo->dba_data, false);
 	}
+
+	if (mdss_dsi_panel_get_hbm_mode(ctrl)) {
+		mdss_dsi_panel_set_hbm_mode(ctrl,
+		   mdss_dsi_panel_get_hbm_mode(ctrl));
+	}
+	 return ret;
 }
 #else
 static void mdss_dsi_panel_off_hdmi(struct mdss_dsi_ctrl_pdata *ctrl,
