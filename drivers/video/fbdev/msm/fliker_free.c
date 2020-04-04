@@ -30,6 +30,7 @@
 #include "fliker_free.h"
 #include "mdss_fb.h"
 
+#include "mdss_mdp.h"
 
 struct mdss_panel_data *pdata;
 struct mdp_pcc_cfg_data pcc_config;
@@ -38,11 +39,34 @@ struct mdp_dither_cfg_data dither_config;
 struct mdp_dither_data_v1_7 *dither_payload;
 u32 copyback = 0;
 u32 dither_copyback = 0;
+static u32 backlight = 0;
 static const u32 pcc_depth[9] = {128,256,512,1024,2048,4096,8192,16384,32768};
 static u32 depth = 8;
 static bool pcc_enabled = false;
 static bool dither_enabled = false;
 static bool mdss_backlight_enable = false;
+
+#ifdef RET_WORKGROUND
+static struct delayed_work back_to_backlight_work;
+static void back_to_backlight(struct work_struct *work)
+{
+	pdata = dev_get_platdata(&get_mfd_copy()->pdev->dev);
+	pdata->set_backlight(pdata, backlight);
+	return;
+}
+
+static int __init my_delay_work_init(void)
+{
+	INIT_DELAYED_WORK(&back_to_backlight_work, back_to_backlight);
+	return 0;
+}
+
+static void __exit my_delay_work_exit(void)
+{
+	return;
+}
+
+#endif
 
 static int fliker_free_push_dither(int depth)
 {
@@ -117,23 +141,20 @@ u32 mdss_panel_calc_backlight(u32 bl_lvl)
 
 void set_fliker_free(bool enabled)
 {
-	if(mdss_backlight_enable == enabled) return;
+	if(mdss_backlight_enable == enabled){
+		return;
+	}
 	mdss_backlight_enable = enabled;
 	pcc_enabled = enabled;
 	dither_enabled = enabled;
-	if (get_mfd_copy())
-		pdata = dev_get_platdata(&get_mfd_copy()->pdev->dev);
-	else return;
-	if (enabled){
-		if ((pdata) && (pdata->set_backlight))
-			pdata->set_backlight(pdata, mdss_panel_calc_backlight(get_bkl_lvl()));
-		else return;
-	}else{
-		if ((pdata) && (pdata->set_backlight)){
-			pdata->set_backlight(pdata,get_bkl_lvl());
-			mdss_panel_calc_backlight(get_bkl_lvl());
-		}else return;
-	}
+	backlight = mdss_panel_calc_backlight(get_bkl_lvl());
+#ifdef RET_WORKGROUND
+	cancel_delayed_work_sync(&back_to_backlight_work);
+	schedule_delayed_work(&back_to_backlight_work, msecs_to_jiffies(RET_WORKGROUND_DELAY));
+#else
+	cancel_delayed_work_sync(&back_to_backlight_work);
+	schedule_delayed_work(&back_to_backlight_work, msecs_to_jiffies(0));
+#endif
 }
 
 void set_elvss_off_threshold(int value)
@@ -172,3 +193,7 @@ static void __exit fliker_free_exit(void)
 
 late_initcall(fliker_free_init);
 module_exit(fliker_free_exit);
+#ifdef RET_WORKGROUND
+module_init(my_delay_work_init);
+module_exit(my_delay_work_exit);
+#endif
