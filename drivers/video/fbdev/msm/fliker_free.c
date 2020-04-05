@@ -147,14 +147,22 @@ void set_fliker_free(bool enabled)
 	mdss_backlight_enable = enabled;
 	pcc_enabled = enabled;
 	dither_enabled = enabled;
-	backlight = mdss_panel_calc_backlight(get_bkl_lvl());
+	if(mdss_backlight_enable){
+		backlight = mdss_panel_calc_backlight(get_bkl_lvl());
 #ifdef RET_WORKGROUND
-	cancel_delayed_work_sync(&back_to_backlight_work);
-	schedule_delayed_work(&back_to_backlight_work, msecs_to_jiffies(RET_WORKGROUND_DELAY));
+		cancel_delayed_work_sync(&back_to_backlight_work);
+		schedule_delayed_work(&back_to_backlight_work, msecs_to_jiffies(RET_WORKGROUND_DELAY));
 #else
-	cancel_delayed_work_sync(&back_to_backlight_work);
-	schedule_delayed_work(&back_to_backlight_work, msecs_to_jiffies(0));
+		pdata = dev_get_platdata(&get_mfd_copy()->pdev->dev);
+		pdata->set_backlight(pdata, backlight);
 #endif
+	}
+	else{
+		backlight = get_bkl_lvl();
+		pdata = dev_get_platdata(&get_mfd_copy()->pdev->dev);
+		pdata->set_backlight(pdata, backlight);
+		mdss_panel_calc_backlight(backlight);
+	}
 }
 
 void set_elvss_off_threshold(int value)
