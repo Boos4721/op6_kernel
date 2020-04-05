@@ -108,20 +108,11 @@ static int set_brightness(int backlight)
 {
     int temp = backlight * (MAX_SCALE - MIN_SCALE) / elvss_off_threshold + MIN_SCALE;
 	temp = clamp_t(int, temp, MIN_SCALE, MAX_SCALE);
-#if FLIKER_FREE_KLAPSE
-	for (depth = 8;depth >= 1;depth--){
-		if(temp >= pcc_depth[depth]) break;
-	}
-	fliker_free_push_dither(depth);
-    return klapse_kcal_push(temp,temp,temp);
-	
-#else 
 	for (depth = 8;depth >= 1;depth--){
 		if(temp >= pcc_depth[depth]) break;
 	}
 	fliker_free_push_dither(depth);
 	return fliker_free_push_pcc(temp);
-	#endif
 }
 
 u32 mdss_panel_calc_backlight(u32 bl_lvl)
