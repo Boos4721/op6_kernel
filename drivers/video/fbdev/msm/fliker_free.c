@@ -54,18 +54,6 @@ static void back_to_backlight(struct work_struct *work)
 	pdata->set_backlight(pdata, backlight);
 	return;
 }
-
-static int __init my_delay_work_init(void)
-{
-	INIT_DELAYED_WORK(&back_to_backlight_work, back_to_backlight);
-	return 0;
-}
-
-static void __exit my_delay_work_exit(void)
-{
-	return;
-}
-
 #endif
 
 static int fliker_free_push_dither(int depth)
@@ -106,8 +94,9 @@ static int fliker_free_push_pcc(int temp)
 
 static int set_brightness(int backlight)
 {
-    int temp = backlight * (MAX_SCALE - MIN_SCALE) / elvss_off_threshold + MIN_SCALE;
-	temp = clamp_t(int, temp, MIN_SCALE, MAX_SCALE);
+	int temp = 0;
+	backlight = clamp_t(int, ((backlight-1)*(BACKLIGHT_INDEX-1)/(elvss_off_threshold-1)+1), 1, BACKLIGHT_INDEX);
+	temp = clamp_t(int, 0x80*bkl_to_pcc[backlight - 1], MIN_SCALE, MAX_SCALE);
 	for (depth = 8;depth >= 1;depth--){
 		if(temp >= pcc_depth[depth]) break;
 	}
@@ -181,6 +170,9 @@ static int __init fliker_free_init(void)
 	dither_config.version = mdp_dither_v1_7;
 	dither_config.block = MDP_LOGICAL_BLOCK_DISP_0;
 	dither_payload = kzalloc(sizeof(struct mdp_dither_data_v1_7),GFP_USER);
+#ifdef RET_WORKGROUND
+	INIT_DELAYED_WORK(&back_to_backlight_work, back_to_backlight);
+#endif
 	return 0;
 }
 
@@ -192,7 +184,3 @@ static void __exit fliker_free_exit(void)
 
 late_initcall(fliker_free_init);
 module_exit(fliker_free_exit);
-#ifdef RET_WORKGROUND
-module_init(my_delay_work_init);
-module_exit(my_delay_work_exit);
-#endif
