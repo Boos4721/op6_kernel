@@ -26,4 +26,4 @@ steps:
       - bash .drone
 trigger:
   branch:
-    - hentai-q
+    - miui-dev

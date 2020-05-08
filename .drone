@@ -6,7 +6,6 @@
 export ARCH=arm64
 export SUBARCH=arm64
 export HOME=/drone
-export TZ=Asia/Shanghai
 
 ############################################################
 # Build Script Variables
@@ -61,7 +60,7 @@ compile() {
 makezip() {
     cp -f $OUTFILE ~/$ZIP/
     cd ~/$ZIP
-    zip -r $NAME-$DATE.zip *
+    zip -r $NAME-MIUI-$DATE *
 }
 
 sf() {
@@ -83,7 +82,7 @@ hub() {
    git remote add origin https://$id:$ss@github.com/Boos4721/updater
    git fetch origin && git pull origin
    git checkout Kernel
-   git add . && git commit -sm "$DATE-CI "
+   git add . && git commit -sm "$DATE-MIUI-CI "
    git push -uf origin Kernel
 }
 
