@@ -1,0 +1,45 @@
+kind: pipeline
+
+name: hentai_ci
+
+platform:
+
+  os: linux
+
+  arch: amd64
+
+clone:
+
+  depth: 1
+
+steps:
+
+  - name: setup&build
+
+    image: ubuntu:latest
+
+    environment:
+
+      sftp_server:
+
+        from_secret: sftp_server
+
+      sftp_username:
+
+        from_secret: sftp_username
+
+      sftp_pwd:
+
+        from_secret: sftp_pwd
+
+      id:
+
+        from_secret: id
+
+      ss:
+
+        from_secret: ss
+
+    commands:
+
+      - bash .drone
