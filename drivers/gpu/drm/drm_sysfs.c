@@ -552,7 +552,7 @@ static ssize_t panel_mismatch_show(struct device *dev,
 
 int oneplus_panel_alpha;
 int oneplus_force_screenfp;
-int op_dimlayer_bl_enable = 0;
+int op_dimlayer_bl_enable = 1;
 int op_dp_enable = 0;
 int op_dither_enable = 0;
 extern int oneplus_get_panel_brightness_to_alpha(void);
