@@ -6986,8 +6986,6 @@ int __meminit init_per_zone_wmark_min(void)
 	setup_min_slab_ratio();
 #endif
 
-	khugepaged_min_free_kbytes_update();
-
 	return 0;
 }
 postcore_initcall(init_per_zone_wmark_min)
