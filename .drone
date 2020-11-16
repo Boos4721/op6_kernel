@@ -64,23 +64,11 @@ makezip() {
     zip -r $NAME-$DATE.zip *
 }
 
-sf() {
-    lftp <<EOF 
-    set sftp:auto-confirm yes
-    open sftp://${sftp_server}
-    user ${sftp_username} ${sftp_pwd}
-    cd /home/frs/project/boosroms/enchilada/Hentai_Kernel
-    mput *.zip
-    bye
-EOF
-    echo "Sftp uploading done!"
-}
-
 hub() {
    mkdir -p ~/$NAME/$NAME && mv -f ~/$ZIP/*.zip ~/$NAME/$NAME/
    cd  ~/$NAME
    git init
-   git remote add origin https://$id:$ss@github.com/Boos4721/updater
+   git remote add origin https://$id:$ss@github.com/Boos4721/updater.git 
    git fetch origin && git pull origin
    git checkout Kernel
    git add . && git commit -sm "$DATE-CI "
@@ -92,7 +80,6 @@ clean
 clone
 compile
 makezip
-#sf
 hub
 
     DIFF=$(($BUILD_END - $BUILD_START))
